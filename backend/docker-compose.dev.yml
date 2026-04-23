@@ -1,0 +1,160 @@
+services:
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: |
+        mongosh --quiet --eval "try { rs.status().ok } catch(e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}).ok }"
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      - mongo
+    entrypoint:
+      - bash
+      - -c
+      - |
+        until mongosh --host mongo:27017 --quiet --eval 'db.runCommand({ping:1}).ok' | grep -q 1; do
+          echo "waiting for mongo..."; sleep 2
+        done
+        mongosh --host mongo:27017 --quiet --eval '
+          try {
+            rs.status()
+          } catch (e) {
+            rs.initiate({_id:"rs0", members:[{_id:0, host:"mongo:27017"}]})
+          }
+        '
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:3
+    environment:
+      - SERVICES=s3
+      - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+    ports:
+      - "4566:4566"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  localstack-init:
+    image: amazon/aws-cli:2
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+    entrypoint:
+      - sh
+      - -c
+      - |
+        aws --endpoint-url=http://localstack:4566 s3 mb s3://nexus-receipts-dev || true
+        aws --endpoint-url=http://localstack:4566 s3 mb s3://nexus-textract-output-dev || true
+    restart: "no"
+
+  temporal:
+    image: temporalio/auto-setup:1.24
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgres
+    depends_on:
+      - temporal-postgres
+    ports:
+      - "7233:7233"
+
+  temporal-postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=temporal
+      - POSTGRES_PASSWORD=temporal
+    volumes:
+      - temporal-pg:/var/lib/postgresql/data
+
+  temporal-ui:
+    image: temporalio/ui:2.27
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      - temporal
+    ports:
+      - "8233:8080"
+
+  backend:
+    build: .
+    depends_on:
+      mongo:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    environment:
+      - ENV=dev
+      - AWS_REGION=us-east-1
+      - AUTH_MODE=dev
+      - DEV_JWT_SECRET=dev-secret-change-me
+      - COGNITO_USER_POOL_ID=us-east-1_DEV
+      - COGNITO_APP_CLIENT_ID=dev-client
+      - COGNITO_JWKS_URL=http://localhost/unused
+      - TEMPORAL_MODE=real
+      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_NAMESPACE=default
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_TLS=false
+      - MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0&directConnection=true
+      - MONGODB_DB=nexus_dev
+      - S3_RECEIPTS_BUCKET=nexus-receipts-dev
+      - S3_TEXTRACT_OUTPUT_BUCKET=nexus-textract-output-dev
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - CORS_ORIGINS=["http://localhost:3000"]
+      - XRAY_ENABLED=false
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    command:
+      - uv
+      - run
+      - uvicorn
+      - nexus_backend.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+    volumes:
+      - ./src:/app/src
+
+volumes:
+  mongo-data:
+  temporal-pg:
