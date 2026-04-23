@@ -74,7 +74,7 @@ class RealTemporalBackend(TemporalBackend):
         task_queue: str,
         memo: dict[str, Any] | None = None,
     ) -> str:
-        from temporalio.client import WorkflowIDReusePolicy
+        from temporalio.common import WorkflowIDReusePolicy
         from temporalio.service import RPCError
 
         if self._client is None:

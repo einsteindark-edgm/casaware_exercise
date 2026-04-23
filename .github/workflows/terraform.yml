@@ -1,0 +1,50 @@
+name: terraform
+
+on:
+  pull_request:
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  terraform:
+    name: fmt + validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      # `init -backend=false` skips remote state setup. Enough for `validate`,
+      # which only needs the provider schemas.
+      - name: terraform init
+        run: terraform init -backend=false
+
+      - name: terraform validate
+        run: terraform validate
+
+      # Plan / apply intentionally omitted while the Terraform state is local.
+      # When we move to a remote S3 backend we'll add:
+      #   - a `terraform plan` step on pull_request
+      #   - a `terraform apply -auto-approve` step on push to main
+      # guarded by a configure-aws-credentials step that assumes
+      # ${{ needs.terraform.outputs.role_arn }} (see infra/terraform/README.md).

@@ -59,7 +59,7 @@ services:
       retries: 20
 
   localstack-init:
-    image: amazon/aws-cli:2
+    image: public.ecr.aws/aws-cli/aws-cli:latest
     depends_on:
       localstack:
         condition: service_healthy
@@ -76,7 +76,7 @@ services:
     restart: "no"
 
   temporal:
-    image: temporalio/auto-setup:1.24
+    image: temporalio/auto-setup:1.28.4
     environment:
       - DB=postgres12
       - DB_PORT=5432
@@ -97,7 +97,7 @@ services:
       - temporal-pg:/var/lib/postgresql/data
 
   temporal-ui:
-    image: temporalio/ui:2.27
+    image: temporalio/ui:2.49.1
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:3000
