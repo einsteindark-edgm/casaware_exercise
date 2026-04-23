@@ -132,11 +132,6 @@ services:
       - REDIS_TLS=false
       - MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0&directConnection=true
       - MONGODB_DB=nexus_dev
-      - S3_RECEIPTS_BUCKET=nexus-receipts-dev
-      - S3_TEXTRACT_OUTPUT_BUCKET=nexus-textract-output-dev
-      - AWS_ENDPOINT_URL=http://localstack:4566
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
       - CORS_ORIGINS=["http://localhost:3000"]
       - XRAY_ENABLED=false
       - LOG_LEVEL=INFO
@@ -154,6 +149,8 @@ services:
       - --reload
     volumes:
       - ./src:/app/src
+    env_file:
+      - .env
 
 volumes:
   mongo-data:

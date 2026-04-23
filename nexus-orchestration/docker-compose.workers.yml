@@ -8,22 +8,17 @@
 
 x-worker-base: &worker-base
   build: .
+  env_file:
+    - .env
   environment: &worker-env
+    # Container-internal networking — always overrides whatever is in .env.
     ENV: dev
-    AWS_REGION: us-east-1
     TEMPORAL_HOST: temporal:7233
     TEMPORAL_NAMESPACE: default
-    MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0&directConnection=true
+    # MONGODB_URI intentionally NOT overridden so Atlas URI from .env wins.
     MONGODB_DB: nexus_dev
     REDIS_URL: redis://redis:6379/0
     REDIS_TLS: "false"
-    S3_RECEIPTS_BUCKET: nexus-receipts-dev
-    S3_TEXTRACT_OUTPUT_BUCKET: nexus-textract-output-dev
-    AWS_ENDPOINT_URL: http://localstack:4566
-    AWS_ACCESS_KEY_ID: test
-    AWS_SECRET_ACCESS_KEY: test
-    FAKE_PROVIDERS: "true"
-    FAKE_HITL_MODE: ${FAKE_HITL_MODE:-force}
     AUDIT_SOURCE: mongo
     LOG_LEVEL: INFO
   networks:

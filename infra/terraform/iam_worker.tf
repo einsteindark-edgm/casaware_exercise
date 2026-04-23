@@ -8,24 +8,30 @@ resource "aws_iam_access_key" "worker" {
 
 data "aws_iam_policy_document" "worker" {
   statement {
-    sid    = "S3Receipts"
+    sid    = "S3Objects"
     effect = "Allow"
     actions = [
       "s3:GetObject",
       "s3:PutObject",
       "s3:DeleteObject",
     ]
-    resources = ["${aws_s3_bucket.receipts.arn}/*"]
+    resources = [
+      "${aws_s3_bucket.receipts.arn}/*",
+      "${aws_s3_bucket.textract_output.arn}/*",
+    ]
   }
 
   statement {
-    sid    = "S3ReceiptsBucket"
+    sid    = "S3Buckets"
     effect = "Allow"
     actions = [
       "s3:ListBucket",
       "s3:GetBucketLocation",
     ]
-    resources = [aws_s3_bucket.receipts.arn]
+    resources = [
+      aws_s3_bucket.receipts.arn,
+      aws_s3_bucket.textract_output.arn,
+    ]
   }
 
   statement {

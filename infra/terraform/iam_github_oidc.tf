@@ -54,6 +54,8 @@ data "aws_iam_policy_document" "gha_terraform_policy" {
     resources = [
       aws_s3_bucket.receipts.arn,
       "${aws_s3_bucket.receipts.arn}/*",
+      aws_s3_bucket.textract_output.arn,
+      "${aws_s3_bucket.textract_output.arn}/*",
     ]
   }
 
@@ -81,6 +83,50 @@ data "aws_iam_policy_document" "gha_terraform_policy" {
       "iam:ListRolePolicies",
       "iam:ListUserPolicies",
       "iam:ListAccessKeys",
+      "iam:PassRole",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "EcrLogin"
+    effect = "Allow"
+    actions = [
+      "ecr:GetAuthorizationToken",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "EcrPushPull"
+    effect = "Allow"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchGetImage",
+      "ecr:DescribeImages",
+      "ecr:DescribeRepositories",
+      "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart",
+      "ecr:CompleteLayerUpload",
+      "ecr:PutImage",
+    ]
+    resources = [
+      aws_ecr_repository.backend.arn,
+      aws_ecr_repository.frontend.arn,
+    ]
+  }
+
+  statement {
+    sid    = "EcsDeploy"
+    effect = "Allow"
+    actions = [
+      "ecs:DescribeServices",
+      "ecs:DescribeTaskDefinition",
+      "ecs:RegisterTaskDefinition",
+      "ecs:UpdateService",
+      "ecs:ListTasks",
+      "ecs:DescribeTasks",
     ]
     resources = ["*"]
   }

@@ -261,13 +261,21 @@ export default function ExpenseDetailPage() {
     return hydratedState ?? liveState ?? "received";
   }, [hydratedState, liveState]);
 
-  const timelineSteps = [
+  type TimelineStep = {
+    id: string;
+    title: string;
+    icon: typeof Clock;
+    isWarning?: boolean;
+    isSuccess?: boolean;
+    isError?: boolean;
+  };
+  const timelineSteps: TimelineStep[] = [
     { id: "received", title: "Received", icon: Clock },
     { id: "ocr", title: "Extracting text (Textract)", icon: FileSearch },
     { id: "hitl", title: "Waiting for your review", icon: AlertTriangle, isWarning: true },
     { id: "completed", title: "Audit completed", icon: CheckCircle2, isSuccess: true },
     { id: "failed", title: "Processing error", icon: XCircle, isError: true }
-  ] as const;
+  ];
 
   let activeStepIndex = 0;
   if (currentState === "processing") activeStepIndex = 1;
