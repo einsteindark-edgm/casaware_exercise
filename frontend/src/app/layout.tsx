@@ -8,7 +8,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Nexus",
-  description: "Sistema de auditoría de gastos Nexus",
+  description: "Nexus expense audit system",
 };
 
 export default function RootLayout({

@@ -84,7 +84,7 @@ export default function ChatPage() {
     } catch (err) {
       console.error(err);
       // FAKE RESPONSE FALLBACK FOR LOCAL DEV without backend
-      let fakeContent = "Esta es una respuesta simulada por falta de conexión al backend. Te sugiero que revises tu recibo de Starbucks.";
+      let fakeContent = "This is a simulated response due to lack of backend connection. I suggest you check your Starbucks receipt.";
       let idx = 0;
       const interval = setInterval(() => {
         setMessages(prev => prev.map(msg => 
@@ -105,8 +105,8 @@ export default function ChatPage() {
   return (
     <div className="h-[calc(100vh-120px)] max-h-[800px] flex flex-col mx-auto max-w-4xl border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden">
       <div className="bg-white border-b px-6 py-4">
-        <h1 className="text-xl font-bold tracking-tight text-gray-900">Asistente de Auditoría RAG</h1>
-        <p className="text-sm text-gray-500">Consulta tu historial de gastos usando lenguaje natural.</p>
+        <h1 className="text-xl font-bold tracking-tight text-gray-900">RAG Audit Assistant</h1>
+        <p className="text-sm text-gray-500">Query your expense history using natural language.</p>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 bg-gray-50" ref={scrollRef}>
@@ -116,8 +116,8 @@ export default function ChatPage() {
               <Bot className="w-8 h-8 text-blue-600" />
             </div>
             <div>
-              <p className="text-lg font-medium text-gray-900">¿En qué te puedo ayudar hoy?</p>
-              <p className="text-sm text-gray-500 max-w-sm mt-1">Prueba preguntando "¿Cuánto gasté en Starbucks el mes pasado?" o "¿Tengo políticas de viaje incumplidas?"</p>
+              <p className="text-lg font-medium text-gray-900">How can I help you today?</p>
+              <p className="text-sm text-gray-500 max-w-sm mt-1">Try asking "How much did I spend at Starbucks last month?" or "Do I have any violated travel policies?"</p>
             </div>
           </div>
         ) : (
@@ -138,7 +138,7 @@ export default function ChatPage() {
                       {msg.citations.map((cit, i) => (
                         <Badge key={i} variant="secondary" className="text-xs bg-white border cursor-pointer hover:bg-gray-50">
                           <Link href={`/expenses/${cit.expense_id}`}>
-                            Referencia [{i+1}]: {cit.snippet.substring(0, 20)}...
+                            Reference [{i+1}]: {cit.snippet.substring(0, 20)}...
                           </Link>
                         </Badge>
                       ))}
@@ -155,7 +155,7 @@ export default function ChatPage() {
         <form onSubmit={handleSubmit} className="flex gap-4 max-w-4xl mx-auto relative">
           <Input 
             className="flex-1 rounded-full pl-6 pr-14 h-12 bg-gray-50 border-gray-300 focus-visible:ring-blue-500"
-            placeholder="Pregunta sobre tus gastos..."
+            placeholder="Ask about your expenses..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={isLoading}

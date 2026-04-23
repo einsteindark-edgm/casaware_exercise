@@ -35,27 +35,27 @@ export default function ExpensesListPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Mis Recibos</h1>
-          <p className="text-gray-500">Historial de gastos reportados.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">My Receipts</h1>
+          <p className="text-gray-500">History of reported expenses.</p>
         </div>
         <Link href="/expenses/new" className={buttonVariants()}>
           <FileText className="mr-2 h-4 w-4" />
-          Reportar Gasto
+          Report Expense
         </Link>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Gastos Recientes</CardTitle>
+          <CardTitle>Recent Expenses</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <p className="py-8 text-center text-sm text-gray-500">Cargando gastos…</p>
+            <p className="py-8 text-center text-sm text-gray-500">Loading expenses…</p>
           ) : isError ? (
-            <p className="py-8 text-center text-sm text-red-500">Error al cargar los gastos.</p>
+            <p className="py-8 text-center text-sm text-red-500">Error loading expenses.</p>
           ) : items.length === 0 ? (
             <p className="py-8 text-center text-sm text-gray-500">
-              Aún no has reportado gastos. Empieza subiendo un recibo.
+              You haven't reported any expenses yet. Start by uploading a receipt.
             </p>
           ) : (
             <div className="divide-y divide-gray-100">
@@ -71,13 +71,13 @@ export default function ExpensesListPage() {
                       <span className="text-xs text-gray-500 ml-1">{exp.currency}</span>
                     </div>
                     <div className="w-32">
-                      {exp.status === 'approved' && <span className="flex items-center text-xs text-green-600"><CheckCircle className="w-3 h-3 mr-1" /> Aprobado</span>}
-                      {(exp.status === 'pending' || exp.status === 'processing') && <span className="flex items-center text-xs text-blue-600"><Clock className="w-3 h-3 mr-1" /> En proceso</span>}
-                      {exp.status === 'hitl_required' && <span className="flex items-center text-xs text-orange-600"><AlertTriangle className="w-3 h-3 mr-1" /> Requiere acción</span>}
-                      {exp.status === 'rejected' && <span className="flex items-center text-xs text-red-600"><XCircle className="w-3 h-3 mr-1" /> Rechazado</span>}
+                      {exp.status === 'approved' && <span className="flex items-center text-xs text-green-600"><CheckCircle className="w-3 h-3 mr-1" /> Approved</span>}
+                      {(exp.status === 'pending' || exp.status === 'processing') && <span className="flex items-center text-xs text-blue-600"><Clock className="w-3 h-3 mr-1" /> Processing</span>}
+                      {exp.status === 'hitl_required' && <span className="flex items-center text-xs text-orange-600"><AlertTriangle className="w-3 h-3 mr-1" /> Action required</span>}
+                      {exp.status === 'rejected' && <span className="flex items-center text-xs text-red-600"><XCircle className="w-3 h-3 mr-1" /> Rejected</span>}
                     </div>
                     <Link href={`/expenses/${exp.expense_id}`} className={buttonVariants({ variant: "ghost", size: "sm" })}>
-                      Ver <ArrowRight className="ml-1 w-4 h-4" />
+                      View <ArrowRight className="ml-1 w-4 h-4" />
                     </Link>
                   </div>
                 </div>

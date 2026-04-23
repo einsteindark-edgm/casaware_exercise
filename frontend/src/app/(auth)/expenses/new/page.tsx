@@ -13,11 +13,11 @@ import { toast } from "sonner";
 import { apiClient } from "@/lib/api/client";
 
 const formSchema = z.object({
-  amount: z.string().min(1, "El monto es requerido"),
-  currency: z.string().min(1, "La moneda es requerida"),
-  date: z.string().min(1, "La fecha es requerida"),
-  vendor: z.string().min(1, "El proveedor es requerido"),
-  category: z.string().min(1, "La categoría es requerida"),
+  amount: z.string().min(1, "Amount is required"),
+  currency: z.string().min(1, "Currency is required"),
+  date: z.string().min(1, "Date is required"),
+  vendor: z.string().min(1, "Vendor is required"),
+  category: z.string().min(1, "Category is required"),
 });
 
 export default function NewExpensePage() {
@@ -35,7 +35,7 @@ export default function NewExpensePage() {
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     if (!file) {
-      toast.error("Por favor selecciona un recibo (PDF o Imagen)");
+      toast.error("Please select a receipt (PDF or Image)");
       return;
     }
 
@@ -69,13 +69,13 @@ export default function NewExpensePage() {
       clearInterval(progressInterval);
       setUploadProgress(100);
       
-      toast.success("Recibo subido exitosamente");
-      // Redirigir al detalle para ver el timeline en vivo
+      toast.success("Receipt uploaded successfully");
+      // Redirect to detail to see live timeline
       router.push(`/expenses/${response.expense_id}`);
       
     } catch (error) {
       console.error(error);
-      toast.error("Error al subir el recibo");
+      toast.error("Error uploading receipt");
       setIsUploading(false);
     }
   };
@@ -83,22 +83,22 @@ export default function NewExpensePage() {
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Reportar Gasto</h1>
-        <p className="text-gray-500">Sube tu recibo e ingresa los datos para iniciar la auditoría.</p>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Report Expense</h1>
+        <p className="text-gray-500">Upload your receipt and enter the data to start the audit.</p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Detalles del Recibo</CardTitle>
+          <CardTitle>Receipt Details</CardTitle>
           <CardDescription>
-            Los datos reportados aquí serán validados contra el recibo adjunto por nuestro agente de auditoría.
+            The reported data here will be validated against the attached receipt by our audit agent.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             
             <div className="space-y-2">
-              <Label htmlFor="receipt">Recibo (PDF o Imagen)</Label>
+              <Label htmlFor="receipt">Receipt (PDF or Image)</Label>
               <Input 
                 id="receipt" 
                 type="file" 
@@ -110,30 +110,30 @@ export default function NewExpensePage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="amount">Monto reportado</Label>
+                <Label htmlFor="amount">Reported amount</Label>
                 <Input id="amount" type="number" step="0.01" {...register("amount")} disabled={isUploading} />
                 {errors.amount && <p className="text-xs text-red-500">{errors.amount.message}</p>}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="currency">Moneda</Label>
+                <Label htmlFor="currency">Currency</Label>
                 <Input id="currency" {...register("currency")} disabled={isUploading} />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="date">Fecha</Label>
+              <Label htmlFor="date">Date</Label>
               <Input id="date" type="date" {...register("date")} disabled={isUploading} />
               {errors.date && <p className="text-xs text-red-500">{errors.date.message}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="vendor">Proveedor</Label>
+                <Label htmlFor="vendor">Vendor</Label>
                 <Input id="vendor" {...register("vendor")} disabled={isUploading} />
                 {errors.vendor && <p className="text-xs text-red-500">{errors.vendor.message}</p>}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="category">Categoría</Label>
+                <Label htmlFor="category">Category</Label>
                 <Input id="category" {...register("category")} disabled={isUploading} />
                 {errors.category && <p className="text-xs text-red-500">{errors.category.message}</p>}
               </div>
@@ -142,7 +142,7 @@ export default function NewExpensePage() {
             {isUploading && (
               <div className="space-y-2">
                 <div className="flex justify-between text-xs text-gray-500">
-                  <span>Subiendo e iniciando auditoría...</span>
+                  <span>Uploading and starting audit...</span>
                   <span>{uploadProgress}%</span>
                 </div>
                 <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
@@ -155,7 +155,7 @@ export default function NewExpensePage() {
             )}
 
             <Button type="submit" className="w-full" disabled={isUploading}>
-              {isUploading ? 'Procesando...' : 'Subir y Auditar'}
+              {isUploading ? 'Processing...' : 'Upload and Audit'}
             </Button>
           </form>
         </CardContent>

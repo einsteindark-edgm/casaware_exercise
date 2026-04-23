@@ -15,7 +15,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   
-  // Establecer conexión global a SSE
+  // Establish global SSE connection
   const { connected } = useSSEEvents({ enabled: !!user });
   const pendingHITL = useSSEStore((state) => state.pendingHITL);
 
@@ -25,10 +25,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
     }
   }, [user, loading, router, pathname]);
 
-  // Toast listener global para nuevos HITL
+  // Global toast listener for new HITL
   useEffect(() => {
-    // Si la cantidad de pendingHITL cambia, podríamos mostrar un toast
-    // Para simplificar, confiaremos en que el estado se reflejará en la UI.
+    // If pendingHITL amount changes, we could show a toast
+    // To simplify, we trust the state will be reflected in the UI.
   }, [pendingHITL.length]);
 
   if (loading) {
@@ -40,13 +40,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
-    return null; // El redirect lo maneja el useEffect
+    return null; // The redirect is handled by useEffect
   }
 
   const navItems = [
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
-    { name: "Recibos", href: "/expenses", icon: Receipt },
-    { name: "Nuevo Gasto", href: "/expenses/new", icon: FileText },
+    { name: "Receipts", href: "/expenses", icon: Receipt },
+    { name: "New Expense", href: "/expenses/new", icon: FileText },
     { name: "Chatbot RAG", href: "/chat", icon: MessageSquare },
   ];
 
@@ -97,7 +97,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             onClick={signOut}
           >
             <LogOut className="w-4 h-4 mr-2" />
-            Cerrar sesión
+            Log out
           </Button>
         </div>
       </aside>

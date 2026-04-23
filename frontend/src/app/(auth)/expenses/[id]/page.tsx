@@ -44,13 +44,13 @@ interface ExpenseEvent {
 }
 
 const EVENT_LABELS: Record<string, string> = {
-  created: "Recibo cargado",
-  ocr_started: "OCR iniciado (Textract)",
-  ocr_completed: "OCR completado",
-  hitl_required: "Se solicitó revisión humana",
-  hitl_resolved: "Revisión humana resuelta",
-  completed: "Auditoría completada",
-  failed: "Auditoría falló",
+  created: "Receipt uploaded",
+  ocr_started: "OCR started (Textract)",
+  ocr_completed: "OCR completed",
+  hitl_required: "Human review requested",
+  hitl_resolved: "Human review resolved",
+  completed: "Audit completed",
+  failed: "Audit failed",
 };
 
 function formatEventLabel(eventType: string): string {
@@ -125,7 +125,7 @@ export default function ExpenseDetailPage() {
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [receiptMime, setReceiptMime] = useState<string | null>(null);
 
-  // Hidratar estado inicial desde backend persistente
+  // Hydrate initial state from persistent backend
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -136,7 +136,7 @@ export default function ExpenseDetailPage() {
         let state = stateFromExpense(expenseData.status);
         const expense = expenseData;
 
-        // Intentar refinar con Temporal (puede 404 si el backend reinició)
+        // Try to refine with Temporal (may 404 if backend restarted)
         try {
           const wf = await apiClient
             .get(`api/v1/workflows/${expense.workflow_id}/status`)
@@ -148,10 +148,10 @@ export default function ExpenseDetailPage() {
             else if (wfState) state = maxState(state, wfState);
           }
         } catch {
-          // workflow no encontrado → confiamos en expense.status
+          // workflow not found → trust expense.status
         }
 
-        // Si hay HITL pendiente, recuperar el task_id
+        // If pending HITL, recover task_id
         if (state === "hitl") {
           try {
             const tasks = await apiClient
@@ -189,7 +189,7 @@ export default function ExpenseDetailPage() {
     };
   }, [id]);
 
-  // Descargar el recibo como blob (URL autenticada → object URL para <img>/<embed>)
+  // Download receipt as blob (Authenticated URL → object URL for <img>/<embed>)
   useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
@@ -210,7 +210,7 @@ export default function ExpenseDetailPage() {
     };
   }, [id]);
 
-  // Procesar eventos SSE en vivo
+  // Process live SSE events
   useEffect(() => {
     if (!events.length) return;
     let next: TimelineState | null = liveState;
@@ -262,11 +262,11 @@ export default function ExpenseDetailPage() {
   }, [hydratedState, liveState]);
 
   const timelineSteps = [
-    { id: "received", title: "Recibido", icon: Clock },
-    { id: "ocr", title: "Extrayendo texto (Textract)", icon: FileSearch },
-    { id: "hitl", title: "Esperando tu revisión", icon: AlertTriangle, isWarning: true },
-    { id: "completed", title: "Auditoría completada", icon: CheckCircle2, isSuccess: true },
-    { id: "failed", title: "Error en proceso", icon: XCircle, isError: true }
+    { id: "received", title: "Received", icon: Clock },
+    { id: "ocr", title: "Extracting text (Textract)", icon: FileSearch },
+    { id: "hitl", title: "Waiting for your review", icon: AlertTriangle, isWarning: true },
+    { id: "completed", title: "Audit completed", icon: CheckCircle2, isSuccess: true },
+    { id: "failed", title: "Processing error", icon: XCircle, isError: true }
   ] as const;
 
   let activeStepIndex = 0;
@@ -282,59 +282,59 @@ export default function ExpenseDetailPage() {
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Detalle de Auditoría</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Audit Detail</h1>
           <p className="text-gray-500">ID: {id}</p>
         </div>
         <Badge variant={connected ? "default" : "secondary"}>
-          {connected ? "En vivo" : "Conectando..."}
+          {connected ? "Live" : "Connecting..."}
         </Badge>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Información del gasto</CardTitle>
-            <CardDescription>Datos ingresados al crear la auditoría.</CardDescription>
+            <CardTitle>Expense Information</CardTitle>
+            <CardDescription>Data entered when creating the audit.</CardDescription>
           </CardHeader>
           <CardContent>
             {expense ? (
               <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 text-sm">
-                <dt className="text-gray-500">Monto</dt>
+                <dt className="text-gray-500">Amount</dt>
                 <dd className="text-gray-900 font-medium">
                   {expense.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })} {expense.currency}
                 </dd>
-                <dt className="text-gray-500">Fecha</dt>
+                <dt className="text-gray-500">Date</dt>
                 <dd className="text-gray-900">{new Date(expense.date).toLocaleDateString()}</dd>
                 <dt className="text-gray-500">Vendor</dt>
                 <dd className="text-gray-900">{expense.vendor}</dd>
-                <dt className="text-gray-500">Categoría</dt>
+                <dt className="text-gray-500">Category</dt>
                 <dd className="text-gray-900">{expense.category}</dd>
-                <dt className="text-gray-500">Estado</dt>
+                <dt className="text-gray-500">Status</dt>
                 <dd className="text-gray-900 capitalize">{expense.status.replace("_", " ")}</dd>
-                <dt className="text-gray-500">Creado</dt>
+                <dt className="text-gray-500">Created</dt>
                 <dd className="text-gray-900">{new Date(expense.created_at).toLocaleString()}</dd>
-                <dt className="text-gray-500">Recibo</dt>
+                <dt className="text-gray-500">Receipt</dt>
                 <dd className="text-gray-700 font-mono text-xs break-all">{expense.receipt_id}</dd>
               </dl>
             ) : (
-              <p className="text-sm text-gray-500">{hydrating ? "Cargando..." : "No disponible"}</p>
+              <p className="text-sm text-gray-500">{hydrating ? "Loading..." : "Not available"}</p>
             )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Recibo cargado</CardTitle>
-            <CardDescription>Archivo original enviado por el usuario.</CardDescription>
+            <CardTitle>Uploaded Receipt</CardTitle>
+            <CardDescription>Original file uploaded by the user.</CardDescription>
           </CardHeader>
           <CardContent>
             {!receiptUrl ? (
-              <p className="text-sm text-gray-500">Cargando recibo...</p>
+              <p className="text-sm text-gray-500">Loading receipt...</p>
             ) : receiptMime?.startsWith("image/") ? (
               <a href={receiptUrl} target="_blank" rel="noreferrer" className="block">
                 <img
                   src={receiptUrl}
-                  alt="Recibo"
+                  alt="Receipt"
                   className="w-full max-h-96 object-contain rounded border bg-gray-50"
                 />
               </a>
@@ -351,7 +351,7 @@ export default function ExpenseDetailPage() {
                   rel="noreferrer"
                   className="text-sm text-blue-600 hover:underline"
                 >
-                  Abrir PDF en nueva pestaña
+                  Open PDF in new tab
                 </a>
               </div>
             ) : (
@@ -361,7 +361,7 @@ export default function ExpenseDetailPage() {
                 rel="noreferrer"
                 className="text-sm text-blue-600 hover:underline"
               >
-                Descargar archivo
+                Download file
               </a>
             )}
           </CardContent>
@@ -370,9 +370,9 @@ export default function ExpenseDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Progreso de la Auditoría</CardTitle>
+          <CardTitle>Audit Progress</CardTitle>
           <CardDescription>
-            {hydrating ? "Cargando estado..." : "Eventos en tiempo real desde el orchestrator."}
+            {hydrating ? "Loading status..." : "Real-time events from the orchestrator."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -409,12 +409,12 @@ export default function ExpenseDetailPage() {
 
                     {isActive && step.id === "hitl" && hitlTaskId && (
                       <div className="mt-3 bg-orange-50 rounded-md p-4 border border-orange-100">
-                        <p className="text-sm text-orange-800 mb-3">Se detectaron discrepancias entre lo reportado y el OCR.</p>
+                        <p className="text-sm text-orange-800 mb-3">Discrepancies detected between the reported data and OCR.</p>
                         <Button
                           onClick={() => router.push(`/hitl/${hitlTaskId}`)}
                           className="bg-orange-600 hover:bg-orange-700"
                         >
-                          Resolver ahora <ArrowRight className="ml-2 w-4 h-4" />
+                          Resolve now <ArrowRight className="ml-2 w-4 h-4" />
                         </Button>
                       </div>
                     )}
@@ -428,12 +428,12 @@ export default function ExpenseDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Historial del recibo</CardTitle>
-          <CardDescription>Todos los estados que tuvo este documento, en orden cronológico.</CardDescription>
+          <CardTitle>Receipt History</CardTitle>
+          <CardDescription>All states this document had, in chronological order.</CardDescription>
         </CardHeader>
         <CardContent>
           {history.length === 0 ? (
-            <p className="text-sm text-gray-500">{hydrating ? "Cargando historial..." : "Sin eventos registrados."}</p>
+            <p className="text-sm text-gray-500">{hydrating ? "Loading history..." : "No events recorded."}</p>
           ) : (
             <ul className="space-y-4">
               {history.map((event) => {
@@ -451,7 +451,7 @@ export default function ExpenseDetailPage() {
                         </span>
                       </div>
                       <p className="text-xs text-gray-500">
-                        {event.actor.type === "user" ? "Usuario" : event.actor.type === "system" ? "Sistema" : event.actor.type}
+                        {event.actor.type === "user" ? "User" : event.actor.type === "system" ? "System" : event.actor.type}
                         {event.actor.id ? ` · ${event.actor.id}` : ""}
                       </p>
                       {detailsStr && (
@@ -472,7 +472,7 @@ export default function ExpenseDetailPage() {
         </CardHeader>
         <CardContent>
           <div className="text-xs font-mono bg-white p-4 rounded border overflow-x-auto max-h-60 overflow-y-auto">
-            {events.length === 0 ? "Esperando eventos..." :
+            {events.length === 0 ? "Waiting for events..." :
               events.map((e, i) => (
                 <div key={i} className="mb-2 pb-2 border-b border-gray-100 last:border-0">
                   <span className="text-blue-600">[{new Date(e.timestamp).toLocaleTimeString()}]</span>

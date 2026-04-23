@@ -43,7 +43,7 @@ export default function LoginPage() {
         <CardHeader className="text-center pb-6">
           <CardTitle className="text-3xl font-bold tracking-tight text-gray-900">Nexus</CardTitle>
           <CardDescription className="text-base text-gray-500">
-            Inicia sesión para auditar tus recibos
+            Log in to audit your receipts
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -51,11 +51,11 @@ export default function LoginPage() {
             className="w-full font-medium h-12"
             onClick={handleLogin}
           >
-            {devMode ? "Entrar (modo dev)" : "Iniciar sesión con Cognito"}
+            {devMode ? "Log in (dev mode)" : "Log in with Cognito"}
           </Button>
           {devMode && (
             <p className="mt-6 text-center text-xs text-gray-400">
-              Modo dev activo — el backend emite un JWT HS256 firmado con DEV_JWT_SECRET.
+              Dev mode active — backend issues an HS256 JWT signed with DEV_JWT_SECRET.
             </p>
           )}
         </CardContent>

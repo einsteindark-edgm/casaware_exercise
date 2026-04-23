@@ -59,8 +59,7 @@ export default function HITLResolverPage() {
         });
       })
       .catch((err) => {
-        console.error("Failed to load HITL task", err);
-        toast.error("No se pudo cargar la tarea");
+        toast.error("Could not load task");
       })
       .finally(() => setLoading(false));
   }, [taskId, pendingHITL]);
@@ -74,24 +73,24 @@ export default function HITLResolverPage() {
           resolved_fields: decision === "custom" ? customValues : {},
         },
       });
-      toast.success("Tarea resuelta con éxito");
+      toast.success("Task resolved successfully");
       removePendingHITL(taskId);
       router.push(`/expenses/${task.expenseId}`);
     } catch (err) {
       console.error(err);
-      toast.error("No se pudo resolver la tarea");
+      toast.error("Could not resolve task");
       setSubmitting(false);
     }
   };
 
-  if (loading) return <div>Cargando tarea...</div>;
-  if (!task) return <div>Tarea no encontrada</div>;
+  if (loading) return <div>Loading task...</div>;
+  if (!task) return <div>Task not found</div>;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Revisión Manual Requerida</h1>
-        <p className="text-gray-500">El auditor automático detectó discrepancias. Por favor, resuelve el conflicto.</p>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Manual Review Required</h1>
+        <p className="text-gray-500">The automatic auditor detected discrepancies. Please resolve the conflict.</p>
       </div>
 
       <div className="space-y-6">
@@ -100,21 +99,21 @@ export default function HITLResolverPage() {
             <CardHeader className="bg-orange-50/50 pb-4">
               <CardTitle className="text-lg flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5 text-orange-500" />
-                Campo: <span className="uppercase text-orange-900">{conflict.field}</span>
+                Field: <span className="uppercase text-orange-900">{conflict.field}</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-6">
               <div className="grid grid-cols-2 gap-8">
                 {/* User Value */}
                 <div className="space-y-2 p-4 rounded-lg bg-gray-50 border border-gray-100">
-                  <Label className="text-gray-500 uppercase text-xs font-bold tracking-wider">Tú Reportaste</Label>
+                  <Label className="text-gray-500 uppercase text-xs font-bold tracking-wider">You Reported</Label>
                   <p className="text-2xl font-medium">{String(conflict.user_value)}</p>
                 </div>
                 
                 {/* OCR Value */}
                 <div className="space-y-2 p-4 rounded-lg bg-blue-50 border border-blue-100">
                   <div className="flex justify-between items-center">
-                    <Label className="text-blue-600 uppercase text-xs font-bold tracking-wider">OCR Detectó</Label>
+                    <Label className="text-blue-600 uppercase text-xs font-bold tracking-wider">OCR Detected</Label>
                     <Badge variant="outline" className="text-blue-700 bg-blue-100 border-blue-200">
                       Conf: {conflict.confidence}%
                     </Badge>
@@ -124,10 +123,10 @@ export default function HITLResolverPage() {
               </div>
 
               <div className="mt-6">
-                <Label>Edición Manual (Opcional)</Label>
+                <Label>Manual Edit (Optional)</Label>
                 <Input 
                   className="mt-2"
-                  placeholder="Escribe el valor correcto si ambos están mal..."
+                  placeholder="Enter the correct value if both are wrong..."
                   value={customValues[conflict.field] || ""}
                   onChange={(e) => setCustomValues({...customValues, [conflict.field]: e.target.value})}
                 />
@@ -143,7 +142,7 @@ export default function HITLResolverPage() {
           onClick={() => handleResolve("keep_user_value")}
           disabled={submitting}
         >
-          Mantener mi valor
+          Keep my value
         </Button>
         <Button 
           variant="default"
@@ -152,7 +151,7 @@ export default function HITLResolverPage() {
           className="bg-blue-600 hover:bg-blue-700"
         >
           <Check className="w-4 h-4 mr-2" />
-          {Object.keys(customValues).length > 0 ? "Aceptar valor editado" : "Aceptar sugerencia OCR"}
+          {Object.keys(customValues).length > 0 ? "Accept edited value" : "Accept OCR suggestion"}
         </Button>
       </div>
     </div>

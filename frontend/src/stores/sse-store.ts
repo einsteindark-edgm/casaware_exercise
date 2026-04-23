@@ -25,7 +25,7 @@ export const useSSEStore = create<SSEState>((set) => ({
   setConnected: (status) => set({ connected: status }),
   addEvent: (event) => set((state) => ({ recentEvents: [...state.recentEvents, event] })),
   addPendingHITL: (task) => set((state) => ({
-    // Evitar duplicados
+    // Avoid duplicates
     pendingHITL: state.pendingHITL.find(t => t.taskId === task.taskId) 
       ? state.pendingHITL 
       : [...state.pendingHITL, task]
