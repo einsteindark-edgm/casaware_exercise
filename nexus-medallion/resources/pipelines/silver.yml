@@ -19,6 +19,8 @@ resources:
             path: ../../src/silver/expense_events.py
         - notebook:
             path: ../../src/silver/hitl_events.py
+        - notebook:
+            path: ../../src/silver/hitl_discrepancies.py
 
       configuration:
         nexus.catalog: ${var.catalog}

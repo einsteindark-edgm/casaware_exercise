@@ -1,0 +1,82 @@
+name: databricks-deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "nexus-medallion/**"
+      - ".github/workflows/databricks-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      full_refresh:
+        description: "Run silver+gold with --full-refresh-all after deploy"
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  IAM_ROLE_ARN: arn:aws:iam::525237381234:role/nexus-dev-edgm-gha-terraform
+
+jobs:
+  deploy:
+    name: bundle deploy (dev)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nexus-medallion
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: fetch databricks host + token from Secrets Manager
+        id: dbx
+        run: |
+          set -euo pipefail
+          host=$(aws secretsmanager get-secret-value \
+            --secret-id nexus-dev-edgm/databricks_host \
+            --query SecretString --output text)
+          token=$(aws secretsmanager get-secret-value \
+            --secret-id nexus-dev-edgm/databricks_token \
+            --query SecretString --output text)
+          # Mask before exporting.
+          echo "::add-mask::$token"
+          echo "DATABRICKS_HOST=$host" >> $GITHUB_ENV
+          echo "DATABRICKS_TOKEN=$token" >> $GITHUB_ENV
+
+      - name: install databricks cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+          databricks --version
+
+      - name: bundle validate
+        run: databricks bundle validate --target dev
+
+      - name: bundle deploy
+        run: databricks bundle deploy --target dev
+
+      - name: full-refresh silver + gold (optional)
+        if: github.event_name == 'workflow_dispatch' && inputs.full_refresh
+        run: |
+          set -euo pipefail
+          # Resolve pipeline IDs by name — bundle deploy creates them with
+          # deterministic names: nexus-silver-${catalog}, nexus-gold-${catalog}.
+          silver_id=$(databricks pipelines list-pipelines --output json \
+            | jq -r '.[] | select(.name == "nexus-silver-nexus_dev") | .pipeline_id')
+          gold_id=$(databricks pipelines list-pipelines --output json \
+            | jq -r '.[] | select(.name == "nexus-gold-nexus_dev") | .pipeline_id')
+          if [ -z "$silver_id" ] || [ -z "$gold_id" ]; then
+            echo "::error::could not resolve silver/gold pipeline ids"
+            exit 1
+          fi
+          echo "silver_id=$silver_id gold_id=$gold_id"
+          databricks pipelines start-update "$silver_id" --full-refresh-all
+          databricks pipelines start-update "$gold_id" --full-refresh-all

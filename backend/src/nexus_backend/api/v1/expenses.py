@@ -112,6 +112,7 @@ async def create_expense(
             "receipt_id": receipt_id,
             "tenant_id": user.tenant_id,
             "user_id": user.sub,
+            "expense_id": expense_id,
             "s3_bucket": settings.s3_receipts_bucket,
             "s3_key": s3_key,
             "mime_type": effective_mime,

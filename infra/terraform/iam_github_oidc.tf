@@ -149,6 +149,20 @@ data "aws_iam_policy_document" "gha_terraform_policy" {
     ]
     resources = ["*"]
   }
+
+  # Databricks host + token viven en Secrets Manager. El workflow
+  # databricks-deploy.yml los lee antes de invocar `databricks bundle deploy`.
+  statement {
+    sid    = "SecretsReadDatabricks"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue",
+    ]
+    resources = [
+      aws_secretsmanager_secret.databricks_host.arn,
+      aws_secretsmanager_secret.databricks_token.arn,
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "gha_terraform" {

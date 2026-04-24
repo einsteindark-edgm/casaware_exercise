@@ -125,7 +125,7 @@ async def create_hitl_task(inp: dict[str, Any]) -> str:
             "tenant_id": inp["tenant_id"],
             "user_id": inp["user_id"],
             "expense_id": inp["expense_id"],
-            "fields_in_conflict": inp["fields_in_conflict"],
+            "discrepancy_fields": inp["fields_in_conflict"],
             "status": "pending",
             "created_at": _now(),
         }

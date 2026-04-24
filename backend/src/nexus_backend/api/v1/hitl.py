@@ -86,7 +86,15 @@ async def resolve_hitl(
 
     await mongo.db.hitl_tasks.update_one(
         {"task_id": task_id},
-        {"$set": {"status": "resolved", "resolved_at": now}},
+        {
+            "$set": {
+                "status": "resolved",
+                "resolved_at": now,
+                "decision": body.decision,
+                "resolved_fields": body.resolved_fields,
+                "resolved_by": user.sub,
+            }
+        },
     )
 
     await mongo.db.expense_events.insert_one(
