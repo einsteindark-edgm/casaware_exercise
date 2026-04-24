@@ -31,7 +31,7 @@ targets:
     mode: development
     default: true
     workspace:
-      host: https://dbc-cd7c46c8-d871.cloud.databricks.com
+      host: https://dbc-01d95494-7b54.cloud.databricks.com
     variables:
       catalog: "nexus_dev"
       mongodb_db: "nexus_dev"
@@ -41,7 +41,7 @@ targets:
   prod:
     mode: production
     workspace:
-      host: https://dbc-cd7c46c8-d871.cloud.databricks.com
+      host: https://dbc-01d95494-7b54.cloud.databricks.com
     variables:
       catalog: "nexus_prod"
       mongodb_db: "nexus_prod"

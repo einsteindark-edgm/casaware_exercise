@@ -172,9 +172,12 @@ resource "databricks_storage_credential" "nexus_uc" {
 }
 
 resource "databricks_external_location" "uc_root" {
-  count           = var.databricks_enabled ? 1 : 0
-  name            = "${var.prefix}-uc-root"
-  url             = "s3://${aws_s3_bucket.uc_root[0].bucket}/"
+  count = var.databricks_enabled ? 1 : 0
+  name  = "${var.prefix}-uc-root"
+  # Subpath `/nexus/` para no colisionar con el metastore_root_location
+  # (`/metastore/`) que Databricks auto-provisiona en el mismo bucket.
+  # UC rechaza external_locations anidados; por eso no usamos el root.
+  url             = "s3://${aws_s3_bucket.uc_root[0].bucket}/nexus/"
   credential_name = databricks_storage_credential.nexus_uc[0].name
   comment         = "Managed location for catalog ${var.databricks_catalog_name}."
 }
@@ -187,10 +190,13 @@ resource "databricks_external_location" "uc_root" {
 # ── Catalog + schemas ────────────────────────────────────────────────
 
 resource "databricks_catalog" "nexus_dev" {
-  count          = var.databricks_enabled ? 1 : 0
-  name           = var.databricks_catalog_name
-  comment        = "Catalog raiz para el stack Nexus (${var.databricks_catalog_name})."
-  storage_root   = databricks_external_location.uc_root[0].url
+  count   = var.databricks_enabled ? 1 : 0
+  name    = var.databricks_catalog_name
+  comment = "Catalog raiz para el stack Nexus (${var.databricks_catalog_name})."
+  # Databricks normaliza el storage_root sin trailing slash al crear;
+  # el external_location.url sí lo mantiene. trimsuffix evita el
+  # "inconsistent final plan" error del provider.
+  storage_root   = trimsuffix(databricks_external_location.uc_root[0].url, "/")
   isolation_mode = "ISOLATED"
   properties = {
     purpose = "nexus-medallion"

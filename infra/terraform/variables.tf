@@ -99,9 +99,9 @@ variable "msk_broker_volume_gb" {
 }
 
 variable "msk_kafka_version" {
-  description = "Versión de Kafka para el cluster Provisioned."
+  description = "Versión de Kafka para el cluster Provisioned. AWS acepta formato x.y.x (wildcard) o exacto."
   type        = string
-  default     = "3.7.1"
+  default     = "3.8.x"
 }
 
 variable "msk_privatelink_enabled" {
