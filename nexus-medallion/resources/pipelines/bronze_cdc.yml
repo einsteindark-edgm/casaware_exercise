@@ -4,11 +4,27 @@ resources:
       name: "nexus-bronze-cdc-${var.catalog}"
       catalog: ${var.catalog}
       target: "bronze"
-      # Phase B+: continuous=true. Los notebooks leen Kafka (MSK) en streaming,
-      # sin timer externo. Latencia Mongo → bronze ≈ 3s.
-      continuous: true
+      # Phase B+++: DLT Classic triggered. DLT Serverless no soporta NCC
+      # PrivateLink (gated por Databricks support). Classic compute corre
+      # en la VPC del workspace (customer-managed) → peering con la VPC
+      # de MSK + Route53 Resolver (ver infra/terraform/vpc_peering.tf).
+      # Latencia Mongo→bronze ≈ trigger interval (10 min) + cluster startup.
+      continuous: false
       development: true
-      serverless: true
+      serverless: false
+
+      clusters:
+        - label: default
+          # m5.large: 2 vCPU / 8 GB. Suficiente para 5 streaming sources
+          # con bajo volumen en dev. ~$0.096/hr.
+          node_type_id: m5.large
+          autoscale:
+            min_workers: 1
+            max_workers: 2
+            mode: ENHANCED
+          # DBR ≥16.1 requerido para que UC Service Credential firme SASL
+          # IAM auth (sin necesidad de instance profile). 16.4 LTS estable.
+          spark_version: "16.4.x-scala2.12"
 
       libraries:
         - notebook:
@@ -24,11 +40,7 @@ resources:
 
       configuration:
         nexus.catalog: ${var.catalog}
-        # Bootstrap brokers del cluster MSK (output de terraform msk.tf).
         nexus.msk_bootstrap: ${var.msk_bootstrap_servers}
 
-      # UC Service Credential que expone el IAM role para MSK SASL IAM auth.
-      # Se registra en databricks_msk.tf y se usa a nivel de pipeline:
-      # las opciones kafka.sasl.* de cada notebook se firman con estas creds.
       credentials:
         - name: ${var.msk_service_credential}

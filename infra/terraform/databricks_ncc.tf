@@ -41,11 +41,12 @@ resource "databricks_mws_ncc_private_endpoint_rule" "msk_broker" {
   count    = local.ncc_ready ? length(aws_vpc_endpoint_service.msk_broker) : 0
 
   network_connectivity_config_id = databricks_mws_network_connectivity_config.nexus[0].network_connectivity_config_id
-  # Provider databricks 1.113 - para VPC Endpoint Services customer-owned
-  # solo se pasa resource_names (el service_name). El DNS lo resuelve el
-  # propio endpoint interface. domain_names es para el modo "fqdn mapping"
-  # con group_id, que no aplica acá.
-  resource_names = [aws_vpc_endpoint_service.msk_broker[count.index].service_name]
+  # API Databricks NCC: endpoint_service + domain_names (FQDN del broker
+  # que el Kafka client va a resolver via el endpoint privado).
+  endpoint_service = aws_vpc_endpoint_service.msk_broker[count.index].service_name
+  domain_names = [
+    element([for ep in split(",", aws_msk_cluster.nexus_prov[0].bootstrap_brokers_sasl_iam) : split(":", ep)[0]], count.index)
+  ]
 }
 
 output "databricks_ncc_id" {
