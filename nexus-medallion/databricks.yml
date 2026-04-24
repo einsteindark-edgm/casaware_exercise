@@ -1,0 +1,39 @@
+# Databricks Asset Bundle — Nexus Medallion
+# Deploys Lakeflow pipelines (silver, gold) + one-shot jobs (seed, vector setup)
+# to the nexus_<env> Unity Catalog.
+
+bundle:
+  name: nexus-medallion
+
+include:
+  - resources/pipelines/*.yml
+  - resources/jobs/*.yml
+
+variables:
+  catalog:
+    description: "Unity Catalog name (nexus_dev / nexus_prod)."
+    default: "nexus_dev"
+  mongodb_uri_secret_scope:
+    description: "Databricks secret scope that holds 'mongodb_uri'."
+    default: "nexus"
+  mongodb_db:
+    description: "MongoDB database name to seed from."
+    default: "nexus_dev"
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-cd7c46c8-d871.cloud.databricks.com
+    variables:
+      catalog: "nexus_dev"
+      mongodb_db: "nexus_dev"
+
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-cd7c46c8-d871.cloud.databricks.com
+    variables:
+      catalog: "nexus_prod"
+      mongodb_db: "nexus_prod"

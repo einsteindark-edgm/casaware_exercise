@@ -14,12 +14,14 @@ dependencies = [
     "structlog>=24.1",
     "rapidfuzz>=3.9",
     "boto3>=1.34",
+    # Phase C: Vector Search is opt-in at runtime via FAKE_VECTOR_SEARCH=false.
+    # Keep at runtime so the image ships ready to flip without rebuild.
+    "databricks-vectorsearch>=0.50",
 ]
 
 [project.optional-dependencies]
 prod = [
     "databricks-sql-connector>=3.3",
-    "databricks-vectorsearch>=0.50",
     "anthropic>=0.34",
 ]
 

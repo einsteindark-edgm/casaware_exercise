@@ -23,3 +23,7 @@ tfplan
 # CLI config
 .terraformrc
 terraform.rc
+
+# Local variable overrides (tokens, secrets)
+terraform.tfvars
+*.auto.tfvars

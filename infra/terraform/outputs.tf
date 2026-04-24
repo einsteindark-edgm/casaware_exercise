@@ -118,4 +118,21 @@ output "ecs_frontend_service_name" {
   value = aws_ecs_service.frontend.name
 }
 
+# ── Databricks / Unity Catalog (Phase C) ─────────────────────────────
+
+output "databricks_uc_bucket" {
+  description = "S3 bucket usado como managed storage del catalog nexus_dev. Vacio hasta C.2."
+  value       = var.databricks_enabled ? aws_s3_bucket.uc_root[0].bucket : ""
+}
+
+output "databricks_uc_role_arn" {
+  description = "IAM role ARN que UC asume. Pegalo en el storage credential si lo creas via UI."
+  value       = var.databricks_enabled ? aws_iam_role.uc_access[0].arn : ""
+}
+
+output "databricks_catalog" {
+  description = "Nombre del catalog Unity. Se usa en las vars del worker y del asset bundle."
+  value       = var.databricks_enabled ? databricks_catalog.nexus_dev[0].name : ""
+}
+
 data "aws_caller_identity" "current" {}

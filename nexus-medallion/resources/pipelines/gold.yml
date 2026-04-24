@@ -1,0 +1,16 @@
+resources:
+  pipelines:
+    gold_pipeline:
+      name: "nexus-gold-${var.catalog}"
+      catalog: ${var.catalog}
+      target: "gold"
+      continuous: false
+      development: true
+      serverless: true
+
+      libraries:
+        - notebook:
+            path: ../../src/gold/expense_audit.py
+
+      configuration:
+        nexus.catalog: ${var.catalog}

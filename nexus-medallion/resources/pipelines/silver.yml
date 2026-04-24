@@ -1,0 +1,24 @@
+resources:
+  pipelines:
+    silver_pipeline:
+      name: "nexus-silver-${var.catalog}"
+      catalog: ${var.catalog}
+      target: "silver"
+      # Triggered (no continuous) para ahorrar costos en dev. En prod: true.
+      continuous: false
+      development: true
+      # Trial workspace requiere serverless para pipelines DLT.
+      serverless: true
+
+      libraries:
+        - notebook:
+            path: ../../src/silver/expenses.py
+        - notebook:
+            path: ../../src/silver/ocr_extractions.py
+        - notebook:
+            path: ../../src/silver/expense_events.py
+        - notebook:
+            path: ../../src/silver/hitl_events.py
+
+      configuration:
+        nexus.catalog: ${var.catalog}

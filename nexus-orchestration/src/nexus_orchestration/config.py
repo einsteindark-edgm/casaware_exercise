@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # Fake mode: stub external providers (Textract / Bedrock / Vector Search)
     fake_providers: bool = True
 
+    # Per-provider override: let RAG use real Databricks Vector Search while
+    # Textract/Bedrock still run fake (useful while no AWS/Anthropic quota).
+    # Default mirrors fake_providers; set FAKE_VECTOR_SEARCH=false to unlock VS.
+    fake_vector_search: bool | None = None
+
     # When fake_providers=True, controls how fake Textract compares against the
     # user-reported data:
     #   - "auto"  : hash-derived small offset (may or may not trigger HITL)
@@ -68,6 +73,13 @@ class Settings(BaseSettings):
     llm_model: str = "claude-sonnet-4-6"
 
     log_level: str = "INFO"
+
+    @property
+    def use_fake_vector_search(self) -> bool:
+        """Granular override. When unset, follows global fake_providers."""
+        if self.fake_vector_search is None:
+            return self.fake_providers
+        return self.fake_vector_search
 
 
 settings = Settings()

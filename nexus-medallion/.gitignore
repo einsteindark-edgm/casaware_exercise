@@ -1,0 +1,24 @@
+# Databricks
+.databricks/
+.bundle/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets (should never be committed)
+.env
+.env.local
+*.pem
+databricks.cfg
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/

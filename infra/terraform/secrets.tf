@@ -83,3 +83,52 @@ resource "aws_ssm_parameter" "cognito_jwks_url" {
   type  = "String"
   value = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.main.id}/.well-known/jwks.json"
 }
+
+# ── Databricks (Phase C) ─────────────────────────────────────────────
+# Secretos sensibles (host y token del workspace). Poblalos con:
+#   aws secretsmanager put-secret-value --secret-id nexus-dev-edgm/databricks_host ...
+#   aws secretsmanager put-secret-value --secret-id nexus-dev-edgm/databricks_token ...
+# Se crean siempre (aunque databricks_enabled=false) para que el
+# task definition del worker pueda referenciarlos sin drift.
+
+resource "aws_secretsmanager_secret" "databricks_host" {
+  name                    = "${var.prefix}/databricks_host"
+  description             = "Databricks workspace URL (https://dbc-...cloud.databricks.com)."
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "databricks_host_initial" {
+  secret_id     = aws_secretsmanager_secret.databricks_host.id
+  secret_string = "REPLACE_ME_AFTER_PHASE_C0"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+resource "aws_secretsmanager_secret" "databricks_token" {
+  name                    = "${var.prefix}/databricks_token"
+  description             = "Databricks PAT for the worker to call Vector Search."
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "databricks_token_initial" {
+  secret_id     = aws_secretsmanager_secret.databricks_token.id
+  secret_string = "REPLACE_ME_AFTER_PHASE_C0"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+resource "aws_ssm_parameter" "databricks_vs_endpoint" {
+  name  = "/${var.prefix}/databricks_vs_endpoint"
+  type  = "String"
+  value = "nexus-vs-dev"
+}
+
+resource "aws_ssm_parameter" "databricks_vs_index" {
+  name  = "/${var.prefix}/databricks_vs_index"
+  type  = "String"
+  value = "${var.databricks_catalog_name}.vector.expense_chunks_index"
+}

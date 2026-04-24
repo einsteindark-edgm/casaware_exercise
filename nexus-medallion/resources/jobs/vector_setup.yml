@@ -1,0 +1,14 @@
+resources:
+  jobs:
+    vector_setup:
+      name: "nexus-vector-setup-${var.catalog}"
+      description: "One-shot: ensure VS endpoint + Delta Sync index exist."
+
+      tasks:
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../../src/vector/setup_vector_search.py
+            base_parameters:
+              catalog: ${var.catalog}
+              endpoint_name: "nexus-vs-${bundle.target}"
+          # Serverless.

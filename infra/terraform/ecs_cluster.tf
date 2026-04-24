@@ -56,6 +56,8 @@ data "aws_iam_policy_document" "ecs_task_execution_extras" {
       aws_secretsmanager_secret.mongodb_uri.arn,
       aws_secretsmanager_secret.temporal_ngrok_url.arn,
       aws_secretsmanager_secret.redis_url.arn,
+      aws_secretsmanager_secret.databricks_host.arn,
+      aws_secretsmanager_secret.databricks_token.arn,
       "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.prefix}/*",
     ]
   }

@@ -1,0 +1,15 @@
+resources:
+  jobs:
+    seed_bronze:
+      name: "nexus-seed-bronze-${var.catalog}"
+      description: "One-shot: copy MongoDB Atlas collections into bronze tables."
+
+      tasks:
+        - task_key: seed
+          notebook_task:
+            notebook_path: ../../src/seed/seed_bronze_from_mongo.py
+            base_parameters:
+              catalog: ${var.catalog}
+              mongodb_uri_secret_scope: ${var.mongodb_uri_secret_scope}
+              mongodb_db: ${var.mongodb_db}
+          # Serverless — trial workspace no soporta job_clusters custom.

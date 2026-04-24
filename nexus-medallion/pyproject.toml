@@ -1,0 +1,25 @@
+[project]
+name = "nexus-medallion"
+version = "0.1.0"
+description = "Databricks medallion + Vector Search for Nexus"
+requires-python = ">=3.10"
+dependencies = [
+    "pyspark>=3.5.0",
+    "delta-spark>=3.2.0",
+    "pymongo>=4.7",
+    "databricks-sdk>=0.30",
+    "databricks-vectorsearch>=0.40",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
