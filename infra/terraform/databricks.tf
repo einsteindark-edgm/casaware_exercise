@@ -145,23 +145,9 @@ data "aws_iam_policy_document" "uc_access" {
     ]
   }
 
-  # Phase B: UC tambien necesita leer el bucket CDC + escribir el
-  # directorio _autoloader_state/ donde Autoloader mantiene checkpoints.
-  statement {
-    sid    = "S3CDCReadWrite"
-    effect = "Allow"
-    actions = [
-      "s3:GetObject",
-      "s3:PutObject",
-      "s3:DeleteObject",
-      "s3:ListBucket",
-      "s3:GetBucketLocation",
-    ]
-    resources = [
-      aws_s3_bucket.cdc.arn,
-      "${aws_s3_bucket.cdc.arn}/*",
-    ]
-  }
+  # Phase B+: ya no hay S3 CDC — Debezium publica a MSK y Databricks
+  # consume como Kafka source. El statement S3CDCReadWrite se eliminó
+  # junto con el bucket. Credencial MSK vive en databricks_msk.tf.
 }
 
 resource "aws_iam_role_policy" "uc_access" {
@@ -193,14 +179,10 @@ resource "databricks_external_location" "uc_root" {
   comment         = "Managed location for catalog ${var.databricks_catalog_name}."
 }
 
-# Phase B: external location para que Autoloader pueda leer el bucket CDC.
-resource "databricks_external_location" "cdc" {
-  count           = var.databricks_enabled ? 1 : 0
-  name            = "${var.prefix}-cdc"
-  url             = "s3://${aws_s3_bucket.cdc.bucket}/"
-  credential_name = databricks_storage_credential.nexus_uc[0].name
-  comment         = "CDC landing bucket consumed by Autoloader (Phase B)."
-}
+# Phase B+: el external_location "cdc" apuntaba al bucket S3 que
+# Autoloader consumía. En Phase B+ los datos ya no pasan por S3 —
+# van directo MSK → Databricks Kafka source. El external location fue
+# removido junto con el bucket. Ver databricks_msk.tf.
 
 # ── Catalog + schemas ────────────────────────────────────────────────
 

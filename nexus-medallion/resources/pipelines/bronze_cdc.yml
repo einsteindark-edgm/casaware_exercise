@@ -4,9 +4,9 @@ resources:
       name: "nexus-bronze-cdc-${var.catalog}"
       catalog: ${var.catalog}
       target: "bronze"
-      # Triggered: el job de abajo lo dispara cada 5 min. Cambiar a
-      # continuous=true cuando querramos latencia <30s constante (cuesta mas).
-      continuous: false
+      # Phase B+: continuous=true. Los notebooks leen Kafka (MSK) en streaming,
+      # sin timer externo. Latencia Mongo → bronze ≈ 3s.
+      continuous: true
       development: true
       serverless: true
 
@@ -24,4 +24,11 @@ resources:
 
       configuration:
         nexus.catalog: ${var.catalog}
-        nexus.cdc_bucket: ${var.cdc_bucket}
+        # Bootstrap brokers del cluster MSK (output de terraform msk.tf).
+        nexus.msk_bootstrap: ${var.msk_bootstrap_servers}
+
+      # UC Service Credential que expone el IAM role para MSK SASL IAM auth.
+      # Se registra en databricks_msk.tf y se usa a nivel de pipeline:
+      # las opciones kafka.sasl.* de cada notebook se firman con estas creds.
+      credentials:
+        - name: ${var.msk_service_credential}

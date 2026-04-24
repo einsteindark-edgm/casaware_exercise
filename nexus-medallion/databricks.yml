@@ -19,9 +19,12 @@ variables:
   mongodb_db:
     description: "MongoDB database name to seed from."
     default: "nexus_dev"
-  cdc_bucket:
-    description: "S3 bucket donde nexus-cdc escribe JSONL.gz para Autoloader."
-    default: "nexus-dev-edgm-cdc"
+  msk_bootstrap_servers:
+    description: "MSK Serverless bootstrap brokers (puerto 9098, IAM SASL). Output de terraform msk.tf."
+    default: ""
+  msk_service_credential:
+    description: "UC Service Credential name que el pipeline usa para firmar SASL IAM. Output de databricks_msk.tf."
+    default: "nexus-dev-edgm-msk-cred"
 
 targets:
   dev:
@@ -32,7 +35,10 @@ targets:
     variables:
       catalog: "nexus_dev"
       mongodb_db: "nexus_dev"
-      cdc_bucket: "nexus-dev-edgm-cdc"
+      # Reemplazar con el valor real tras `terraform output msk_bootstrap_servers`.
+      # Ejemplo: "boot-xxxxxx.c1.kafka-serverless.us-east-1.amazonaws.com:9098"
+      msk_bootstrap_servers: ""
+      msk_service_credential: "nexus-dev-edgm-msk-cred"
 
   prod:
     mode: production
@@ -41,4 +47,5 @@ targets:
     variables:
       catalog: "nexus_prod"
       mongodb_db: "nexus_prod"
-      cdc_bucket: "nexus-prod-edgm-cdc"
+      msk_bootstrap_servers: ""
+      msk_service_credential: "nexus-prod-edgm-msk-cred"

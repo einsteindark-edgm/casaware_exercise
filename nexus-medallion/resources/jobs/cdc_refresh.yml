@@ -3,24 +3,17 @@ resources:
     nexus_cdc_refresh:
       name: "nexus-cdc-refresh-${var.catalog}"
       description: >-
-        Triggered cada 5 min. Corre el pipeline bronze_cdc (Autoloader
-        consume los nuevos archivos en s3://{cdc_bucket}/...), despues
-        refresca silver y gold, y al final hace sync del index VS.
+        Phase B+: bronze_cdc_pipeline ahora es continuous (lee Kafka MSK en
+        streaming, sin trigger externo). Este job solo agenda silver y gold,
+        que siguen siendo triggered para ahorrar costos — cada 15 min.
 
       schedule:
-        quartz_cron_expression: "0 */5 * * * ?"
+        quartz_cron_expression: "0 */15 * * * ?"
         timezone_id: "UTC"
         pause_status: "UNPAUSED"
 
       tasks:
-        - task_key: bronze_cdc
-          pipeline_task:
-            pipeline_id: "${resources.pipelines.bronze_cdc_pipeline.id}"
-            full_refresh: false
-
         - task_key: silver
-          depends_on:
-            - task_key: bronze_cdc
           pipeline_task:
             pipeline_id: "${resources.pipelines.silver_pipeline.id}"
             full_refresh: false

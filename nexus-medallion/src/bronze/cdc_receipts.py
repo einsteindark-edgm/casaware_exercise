@@ -1,10 +1,10 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # bronze.mongodb_cdc_receipts (Autoloader)
+# MAGIC # bronze.mongodb_cdc_receipts (Kafka source — Phase B+)
 
 # COMMAND ----------
 import dlt
-from pyspark.sql.functions import col, current_timestamp
+from pyspark.sql.functions import col, current_timestamp, from_json
 from pyspark.sql.types import (
     BooleanType,
     LongType,
@@ -33,7 +33,7 @@ RECEIPTS_JSON_SCHEMA = StructType(
 
 @dlt.table(
     name="mongodb_cdc_receipts",
-    comment="CDC events desde s3://{cdc_bucket}/receipts/ via Autoloader.",
+    comment="CDC events desde topic Kafka nexus.nexus_dev.receipts (Debezium).",
     table_properties={
         "delta.enableChangeDataFeed": "true",
         "quality": "bronze",
@@ -41,29 +41,37 @@ RECEIPTS_JSON_SCHEMA = StructType(
     },
 )
 def mongodb_cdc_receipts():
-    base = f"s3://{spark.conf.get('nexus.cdc_bucket')}/receipts/"
-    schema_loc = f"s3://{spark.conf.get('nexus.cdc_bucket')}/_autoloader_state/receipts/"
     return (
-        spark.readStream.format("cloudFiles")
-        .option("cloudFiles.format", "json")
-        .option("cloudFiles.schemaLocation", schema_loc)
-        .option("cloudFiles.inferColumnTypes", "false")
-        .option("cloudFiles.includeExistingFiles", "true")
-        .option("cloudFiles.useIncrementalListing", "auto")
-        .schema(RECEIPTS_JSON_SCHEMA)
-        .load(base)
+        spark.readStream.format("kafka")
+        .option("kafka.bootstrap.servers", spark.conf.get("nexus.msk_bootstrap"))
+        .option("subscribe", "nexus.nexus_dev.receipts")
+        .option("startingOffsets", "earliest")
+        .option("failOnDataLoss", "false")
+        .option("kafka.security.protocol", "SASL_SSL")
+        .option("kafka.sasl.mechanism", "AWS_MSK_IAM")
+        .option(
+            "kafka.sasl.jaas.config",
+            "shadedmskiam.software.amazon.msk.auth.iam.IAMLoginModule required;",
+        )
+        .option(
+            "kafka.sasl.client.callback.handler.class",
+            "shadedmskiam.software.amazon.msk.auth.iam.IAMClientCallbackHandler",
+        )
+        .load()
+        .filter(col("value").isNotNull())
+        .select(from_json(col("value").cast("string"), RECEIPTS_JSON_SCHEMA).alias("p"))
         .select(
-            col("receipt_id"),
-            col("tenant_id"),
-            col("user_id"),
-            col("expense_id"),
-            col("s3_key"),
-            col("content_type"),
-            col("size_bytes"),
-            col("uploaded_at").cast("timestamp").alias("uploaded_at"),
-            col("__op"),
-            col("__source_ts_ms"),
-            col("__deleted"),
+            col("p.receipt_id").alias("receipt_id"),
+            col("p.tenant_id").alias("tenant_id"),
+            col("p.user_id").alias("user_id"),
+            col("p.expense_id").alias("expense_id"),
+            col("p.s3_key").alias("s3_key"),
+            col("p.content_type").alias("content_type"),
+            col("p.size_bytes").alias("size_bytes"),
+            col("p.uploaded_at").cast("timestamp").alias("uploaded_at"),
+            col("p.__op").alias("__op"),
+            col("p.__source_ts_ms").alias("__source_ts_ms"),
+            col("p.__deleted").alias("__deleted"),
             current_timestamp().alias("_cdc_ingestion_ts"),
         )
     )
