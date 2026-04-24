@@ -48,11 +48,18 @@ resource "aws_iam_role" "debezium_task" {
 data "aws_iam_policy_document" "debezium_task" {
   count = var.msk_enabled ? 1 : 0
 
+  # El role necesita acceso a ambos clusters durante la migración:
+  # apunta al Serverless hasta el cutover, después al Provisioned. Los
+  # ARNs se combinan dinámicamente para que un solo apply funcione
+  # ANTES y DESPUÉS del flip de msk_prefer_provisioned.
   statement {
-    sid       = "MSKConnect"
-    effect    = "Allow"
-    actions   = ["kafka-cluster:Connect", "kafka-cluster:DescribeCluster"]
-    resources = [aws_msk_serverless_cluster.nexus[0].arn]
+    sid     = "MSKConnect"
+    effect  = "Allow"
+    actions = ["kafka-cluster:Connect", "kafka-cluster:DescribeCluster"]
+    resources = compact([
+      var.msk_enabled ? aws_msk_serverless_cluster.nexus[0].arn : "",
+      var.msk_provisioned_enabled ? aws_msk_cluster.nexus_prov[0].arn : "",
+    ])
   }
 
   statement {
@@ -66,9 +73,10 @@ data "aws_iam_policy_document" "debezium_task" {
       "kafka-cluster:DescribeTopicDynamicConfiguration",
       "kafka-cluster:AlterTopicDynamicConfiguration",
     ]
-    # MSK IAM ARN para topic es arn:aws:kafka:region:account:topic/<cluster>/<uuid>/<topic-name>.
-    # Wildcard del nombre al final para cubrir todos los topics del cluster.
-    resources = ["${replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":topic/")}/*"]
+    resources = compact([
+      var.msk_enabled ? "${replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":topic/")}/*" : "",
+      var.msk_provisioned_enabled ? "${replace(aws_msk_cluster.nexus_prov[0].arn, ":cluster/", ":topic/")}/*" : "",
+    ])
   }
 
   statement {
@@ -78,7 +86,10 @@ data "aws_iam_policy_document" "debezium_task" {
       "kafka-cluster:AlterGroup",
       "kafka-cluster:DescribeGroup",
     ]
-    resources = ["${replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":group/")}/*"]
+    resources = compact([
+      var.msk_enabled ? "${replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":group/")}/*" : "",
+      var.msk_provisioned_enabled ? "${replace(aws_msk_cluster.nexus_prov[0].arn, ":cluster/", ":group/")}/*" : "",
+    ])
   }
 }
 
@@ -149,7 +160,7 @@ resource "aws_ecs_task_definition" "debezium" {
 
       # ── Sink: Kafka / MSK IAM ──────────────────────────────────────
       { name = "DEBEZIUM_SINK_TYPE", value = "kafka" },
-      { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_BOOTSTRAP_SERVERS", value = aws_msk_serverless_cluster.nexus[0].bootstrap_brokers_sasl_iam },
+      { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_BOOTSTRAP_SERVERS", value = local.msk_bootstrap_active },
       { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_SECURITY_PROTOCOL", value = "SASL_SSL" },
       { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_SASL_MECHANISM", value = "AWS_MSK_IAM" },
       { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_SASL_JAAS_CONFIG", value = "software.amazon.msk.auth.iam.IAMLoginModule required;" },

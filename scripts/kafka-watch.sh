@@ -13,11 +13,17 @@
 #   scripts/kafka-watch.sh hitl_tasks --duration=600
 #   scripts/kafka-watch.sh all                    # 5 topics en paralelo
 #
+#   scripts/kafka-watch.sh create-topics nexus.nexus_dev.expenses \
+#     nexus.nexus_dev.receipts ... [--partitions=3] [--replication-factor=2]
+#
 # Argumentos:
-#   $1  = topic short name (expenses|receipts|hitl_tasks|ocr_extractions|expense_events|dlq|all)
+#   $1  = verbo: create-topics, o topic short name (expenses|receipts|...|dlq|all)
 #         o el nombre completo si empieza con "nexus."
 #   --beginning  lee desde el primer mensaje del topic (default: latest)
 #   --duration=N segundos que vive la task (default: 300 = 5 min, max 3600)
+#   --bootstrap=HOST:PORT   override del bootstrap (default: serverless)
+#   --partitions=N           (solo create-topics, default: 3)
+#   --replication-factor=N   (solo create-topics, default: 2)
 #
 # Requisitos:
 #   - AWS CLI con credenciales del account 525237381234
@@ -33,9 +39,20 @@ BOOTSTRAP="boot-lddwjvb7.c2.kafka-serverless.us-east-1.amazonaws.com:9098"
 MSK_IAM_VERSION="2.3.5"
 
 # Defaults
+MODE="tail"   # tail | create-topics
 TOPIC_ARG=""
 OFFSET_MODE="latest"
 DURATION=300
+PARTITIONS=3
+REPLICATION_FACTOR=2
+BOOTSTRAP_OVERRIDE=""
+CREATE_TOPICS=()
+
+# Primer arg puede ser el verbo "create-topics"; si no, asumimos "tail".
+if [ "${1:-}" = "create-topics" ]; then
+  MODE="create-topics"
+  shift
+fi
 
 # Parse all args uniformly (handle --help first, then topic, then flags)
 for arg in "$@"; do
@@ -45,9 +62,14 @@ for arg in "$@"; do
       exit 0 ;;
     --beginning|--from-beginning) OFFSET_MODE="beginning" ;;
     --duration=*)                 DURATION="${arg#--duration=}" ;;
+    --partitions=*)               PARTITIONS="${arg#--partitions=}" ;;
+    --replication-factor=*)       REPLICATION_FACTOR="${arg#--replication-factor=}" ;;
+    --bootstrap=*)                BOOTSTRAP_OVERRIDE="${arg#--bootstrap=}" ;;
     --*) echo "unknown flag: $arg" >&2; exit 2 ;;
     *)
-      if [ -z "$TOPIC_ARG" ]; then
+      if [ "$MODE" = "create-topics" ]; then
+        CREATE_TOPICS+=("$arg")
+      elif [ -z "$TOPIC_ARG" ]; then
         TOPIC_ARG="$arg"
       else
         echo "extra positional arg ignored: $arg" >&2
@@ -56,6 +78,18 @@ for arg in "$@"; do
   esac
 done
 TOPIC_ARG="${TOPIC_ARG:-expenses}"
+
+# Override del bootstrap (útil para apuntar al MSK Provisioned durante
+# el cutover, antes de que el terraform output cambie).
+if [ -n "$BOOTSTRAP_OVERRIDE" ]; then
+  BOOTSTRAP="$BOOTSTRAP_OVERRIDE"
+fi
+
+if [ "$MODE" = "create-topics" ] && [ ${#CREATE_TOPICS[@]} -eq 0 ]; then
+  echo "ERROR: create-topics requiere al menos un nombre de topic" >&2
+  echo "Uso: scripts/kafka-watch.sh create-topics <topic1> [<topic2>...] [--partitions=N] [--replication-factor=N]" >&2
+  exit 2
+fi
 
 # Clamp duration
 if [ "$DURATION" -lt 60 ];   then DURATION=60; fi
@@ -132,7 +166,40 @@ else
   TOPIC_FLAG="--topic ${TOPICS[0]}"
 fi
 
-CMD=$(cat <<EOF
+if [ "$MODE" = "create-topics" ]; then
+  # Para create-topics armamos un script bash que corre kafka-topics.sh
+  # --create por cada topic (idempotente con --if-not-exists).
+  TOPIC_CREATE_CMDS=""
+  for t in "${CREATE_TOPICS[@]}"; do
+    TOPIC_CREATE_CMDS+=$'\n'"echo '=== creating topic: ${t}'"$'\n'
+    TOPIC_CREATE_CMDS+="/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server ${BOOTSTRAP} --command-config /tmp/c.properties --create --if-not-exists --topic ${t} --partitions ${PARTITIONS} --replication-factor ${REPLICATION_FACTOR} || true"
+  done
+  # También listamos al final para confirmar.
+  TOPIC_CREATE_CMDS+=$'\n'"echo '=== topics after create:'"$'\n'
+  TOPIC_CREATE_CMDS+="/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server ${BOOTSTRAP} --command-config /tmp/c.properties --list"
+
+  CMD=$(cat <<EOF
+set -e
+cd /tmp
+cat > c.properties <<CFG
+security.protocol=SASL_SSL
+sasl.mechanism=AWS_MSK_IAM
+sasl.jaas.config=software.amazon.msk.auth.iam.IAMLoginModule required;
+sasl.client.callback.handler.class=software.amazon.msk.auth.iam.IAMClientCallbackHandler
+CFG
+curl -sL -o /opt/bitnami/kafka/libs/aws-msk-iam-auth.jar \
+  https://github.com/aws/aws-msk-iam-auth/releases/download/v${MSK_IAM_VERSION}/aws-msk-iam-auth-${MSK_IAM_VERSION}-all.jar
+echo "=== kafka-watch create-topics starting at \$(date -u) ==="
+echo "=== bootstrap: ${BOOTSTRAP}"
+echo "=== topics:    ${CREATE_TOPICS[*]}"
+echo "=== partitions=${PARTITIONS} replication=${REPLICATION_FACTOR}"
+echo "==="
+${TOPIC_CREATE_CMDS}
+echo "=== kafka-watch create-topics done at \$(date -u) ==="
+EOF
+  )
+else
+  CMD=$(cat <<EOF
 set -e
 cd /tmp
 cat > c.properties <<CFG
@@ -161,7 +228,8 @@ echo "==="
   --property key.separator=' | '
 echo "=== kafka-watch done at \$(date -u) ==="
 EOF
-)
+  )
+fi
 
 # ── Register task definition (idempotente — ECS reusa si no cambió) ──
 TD_JSON=$(cat <<EOF

@@ -63,11 +63,16 @@ resource "aws_iam_role" "databricks_msk_access" {
 data "aws_iam_policy_document" "databricks_msk_access" {
   count = local.databricks_msk_enabled ? 1 : 0
 
+  # Acceso a ambos clusters durante la migración (mismo patrón que en
+  # debezium.tf). El cluster activo lo elige local.msk_arn_active.
   statement {
-    sid       = "MSKConnect"
-    effect    = "Allow"
-    actions   = ["kafka-cluster:Connect", "kafka-cluster:DescribeCluster"]
-    resources = [aws_msk_serverless_cluster.nexus[0].arn]
+    sid     = "MSKConnect"
+    effect  = "Allow"
+    actions = ["kafka-cluster:Connect", "kafka-cluster:DescribeCluster"]
+    resources = compact([
+      var.msk_enabled ? aws_msk_serverless_cluster.nexus[0].arn : "",
+      var.msk_provisioned_enabled ? aws_msk_cluster.nexus_prov[0].arn : "",
+    ])
   }
 
   statement {
@@ -78,7 +83,10 @@ data "aws_iam_policy_document" "databricks_msk_access" {
       "kafka-cluster:ReadData",
       "kafka-cluster:DescribeTopicDynamicConfiguration",
     ]
-    resources = ["${replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":topic/")}/*"]
+    resources = compact([
+      var.msk_enabled ? "${replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":topic/")}/*" : "",
+      var.msk_provisioned_enabled ? "${replace(aws_msk_cluster.nexus_prov[0].arn, ":cluster/", ":topic/")}/*" : "",
+    ])
   }
 
   statement {
@@ -88,7 +96,10 @@ data "aws_iam_policy_document" "databricks_msk_access" {
       "kafka-cluster:AlterGroup",
       "kafka-cluster:DescribeGroup",
     ]
-    resources = ["${replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":group/")}/*"]
+    resources = compact([
+      var.msk_enabled ? "${replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":group/")}/*" : "",
+      var.msk_provisioned_enabled ? "${replace(aws_msk_cluster.nexus_prov[0].arn, ":cluster/", ":group/")}/*" : "",
+    ])
   }
 }
 

@@ -343,3 +343,200 @@ Si algo se rompe catastróficamente en las primeras 48h post-cutover (bronze vac
 - `nexus-dev-edgm-msk-sg` deja `0.0.0.0/0:9098` ingress (IAM-gated). En prod cerrar a los CIDRs del plano de control Databricks us-east-1.
 - `FileOffsetBackingStore` de Debezium pierde offsets en restart. Antes de prod migrar a `KafkaOffsetBackingStore` con topic interno `_debezium_offsets`.
 - El Service Credential `nexus-dev-edgm-msk-cred` da permisos `kafka-cluster:ReadData` sobre TODOS los topics del cluster. Si aparece un segundo pipeline que no debe leer bronze events, crear un Service Credential nuevo con ARN de topic más específico.
+
+---
+
+# Phase B++ · Runbook: MSK Provisioned + PrivateLink + NCC
+
+> **Status**: Diseñado, en ejecución.
+> **Motivación**: `ConfigException: No resolvable bootstrap urls` en la pipeline DLT bronze. Databricks Serverless compute vive en VPC gestionada por Databricks y no alcanza MSK Serverless (en VPC privada del usuario). Databricks Platform SME confirma que esta combinación no soporta PrivateLink. Opción elegida: migrar MSK Serverless → Provisioned + NCC pattern 2 (NLB per broker).
+> **Estrategia**: No destructivo hasta validar. El cluster Provisioned sube al lado del Serverless; cutover es un flag flip (`msk_prefer_provisioned=true`); el Serverless se destruye al final.
+
+## Pre-requisitos
+
+- Phase B+ original completo y operacional (Debezium + MSK Serverless + bronze).
+- Databricks account admin access (para crear SP + NCC).
+- `databricks` CLI ≥0.205.
+- `terraform` providers actualizados (`terraform init -upgrade` si el provider databricks es viejo).
+
+## Fase 0 · Crear Service Principal account-level
+
+En https://accounts.cloud.databricks.com:
+1. User Management → Service Principals → Create.
+2. Nombre sugerido: `nexus-terraform-account-admin`.
+3. Asignar rol `account admin`.
+4. Generate secret. Copiar `client_id` + `client_secret` + `account_id`.
+5. Pegar en `infra/terraform/terraform.tfvars`:
+
+```
+databricks_account_id    = "<uuid>"
+databricks_client_id     = "<client-id>"
+databricks_client_secret = "<secret>"
+databricks_workspace_id  = "<numeric workspace id, visible en URL ?o=...>"
+```
+
+## Fase 1 · Crear cluster MSK Provisioned (NO destructivo)
+
+En `terraform.tfvars`:
+```
+msk_provisioned_enabled = true
+msk_privatelink_enabled = false   # aún no
+msk_prefer_provisioned  = false   # aún no
+```
+
+```bash
+cd infra/terraform
+terraform plan   # revisar: nuevo cluster, SG, configuration; NO toca Serverless
+terraform apply  # ~25 min
+```
+
+Verificar:
+```bash
+terraform output msk_prov_bootstrap_servers
+terraform output msk_prov_cluster_name
+aws kafka list-clusters-v2 --query 'ClusterInfoList[].[ClusterName,State]' --output table
+```
+
+## Fase 2 · Crear topics en el Provisioned
+
+```bash
+BOOT=$(cd infra/terraform && terraform output -raw msk_prov_bootstrap_servers)
+
+./scripts/kafka-watch.sh create-topics \
+  nexus.nexus_dev.expenses \
+  nexus.nexus_dev.receipts \
+  nexus.nexus_dev.hitl_tasks \
+  nexus.nexus_dev.ocr_extractions \
+  nexus.nexus_dev.expense_events \
+  nexus.dlq \
+  --partitions=3 --replication-factor=2 \
+  --bootstrap="$BOOT"
+```
+
+El script lanza una task Fargate one-shot con `kafka-topics.sh --create --if-not-exists`. Idempotente.
+
+## Fase 3 · PrivateLink (NLBs + Endpoint Services)
+
+```
+msk_privatelink_enabled = true
+```
+
+```bash
+terraform plan   # NLBs + target groups + endpoint services
+terraform apply
+```
+
+Si las IPs de brokers no se resolvieron (`msk_broker_ips_discovered` vacío):
+```bash
+aws ec2 describe-network-interfaces \
+  --filters "Name=description,Values=*kafka*" "Name=vpc-id,Values=<vpc-id>" \
+  --query 'NetworkInterfaces[].PrivateIpAddress' --output text
+```
+Copiar las 2 IPs a `msk_broker_ips = ["10.0.11.x", "10.0.12.y"]` en tfvars y re-apply.
+
+Verificar target health:
+```bash
+for tg_arn in $(aws elbv2 describe-target-groups --query 'TargetGroups[?starts_with(TargetGroupName,`nexus-dev-edgm-msk-tg`)].TargetGroupArn' --output text); do
+  aws elbv2 describe-target-health --target-group-arn "$tg_arn" --query 'TargetHealthDescriptions[].TargetHealth.State' --output text
+done
+```
+Debe decir `healthy` (puede tardar 2-3 min tras el apply).
+
+## Fase 4 · Databricks NCC
+
+Con `databricks_account_id`, `databricks_client_id`, `databricks_client_secret` ya en tfvars:
+
+```bash
+terraform apply  # crea NCC + 2 private_endpoint_rule
+```
+
+Adjuntar NCC al workspace (CLI manual — el workspace no está gestionado por TF):
+```bash
+NCC_ID=$(terraform output -raw databricks_ncc_id)
+WS_ID=$(grep '^databricks_workspace_id' terraform.tfvars | cut -d '"' -f2)
+databricks account workspaces update "$WS_ID" --network-connectivity-config-id "$NCC_ID"
+```
+
+Validar estado endpoint rules:
+```bash
+databricks account network-connectivity-configurations list-private-endpoint-rules "$NCC_ID"
+# Esperar state=ESTABLISHED (~2 min)
+```
+
+## Fase 5 · Cutover
+
+### 5.1 Flip `msk_prefer_provisioned`
+
+```
+msk_prefer_provisioned = true
+```
+
+```bash
+terraform apply  # Debezium redesplega con nuevo bootstrap; IAM statements apuntan a Provisioned
+```
+
+Smoke-test:
+```bash
+./scripts/kafka-watch.sh tail expenses --bootstrap="$(terraform output -raw msk_prov_bootstrap_servers)"
+# crear un expense desde el frontend → el evento debe aparecer en segundos
+```
+
+### 5.2 Redesplegar bundle
+
+```bash
+cd nexus-medallion
+# Editar databricks.yml: targets.dev.variables.msk_bootstrap_servers = <nuevo valor>
+databricks bundle deploy -t dev
+
+BRONZE_ID=$(databricks pipelines list-pipelines --filter "name like 'bronze_cdc%'" --output json | jq -r '.[0].pipeline_id')
+databricks pipelines start-update "$BRONZE_ID" --full-refresh-all
+databricks pipelines get "$BRONZE_ID"  # state=RUNNING, sin ConfigException
+```
+
+Validar SQL:
+```sql
+SELECT __op, COUNT(*) FROM nexus_dev.bronze.mongodb_cdc_expenses GROUP BY __op;
+SELECT MAX(__source_ts_ms), (unix_millis(current_timestamp()) - MAX(__source_ts_ms))/1000 AS lag_sec
+FROM nexus_dev.bronze.mongodb_cdc_expenses;
+-- lag_sec < 30 en horas activas
+```
+
+## Fase 6 · Destruir MSK Serverless
+
+Tras 24h de operación con Provisioned:
+
+```
+msk_enabled = false
+```
+Borrar también `aws_msk_serverless_cluster.nexus` y su SG del código si se quiere limpieza completa.
+
+```bash
+terraform apply
+```
+
+## Rollback
+
+Si NCC no llega a `ESTABLISHED` o bronze sigue con timeouts:
+
+1. `msk_prefer_provisioned = false` → `terraform apply`. Debezium vuelve a Serverless.
+2. `msk_privatelink_enabled = false` → `terraform apply`. Destruye NLBs/VPCES/NCC rules.
+3. Bundle: revertir `msk_bootstrap_servers` al valor Serverless, `databricks bundle deploy`, restart pipeline.
+
+MSK Serverless sigue vivo durante Fases 1-5, así que el rollback es instantáneo.
+
+## Costo incremental (dev)
+
+- 2× `kafka.t3.small` broker: ~$67/mo
+- 2× 100 GB gp3 EBS: ~$20/mo
+- 2× NLB internal: ~$33/mo + LCU <$5
+- 2× NCC private endpoint: ~$30/mo (verificar pricing actual Databricks)
+- Data processing PrivateLink dev: <$5/mo
+
+**Total incremental ~$160/mo**, menos MSK Serverless actual (~$150/mo al destruirse) = **neto ~+$10/mo**.
+
+## Known unknowns (verificar durante ejecución)
+
+1. `data "aws_network_interfaces"` matchea descripción de ENIs de broker — si falla, usar `var.msk_broker_ips`.
+2. `databricks_mws_ncc_private_endpoint_rule` esquema (resource_names vs resource_id, group_id requerido o no) varía entre versiones del provider. Si el apply falla, revisar CHANGELOG del provider `databricks` instalado.
+3. `databricks_serverless_principal_arn = arn:aws:iam::790110701330:root` para us-east-1. Databricks puede rotarlo — validar contra doc oficial antes del apply del endpoint service.
+4. DLT Serverless debe usar NCC adjunto al workspace. Algunos flags Serverless requieren workspace-setting explícito. Si tras fase 5.2 sigue el `ConfigException`, escalar a Databricks support.
