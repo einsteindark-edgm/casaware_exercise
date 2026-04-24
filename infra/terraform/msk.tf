@@ -23,7 +23,7 @@ variable "msk_enabled" {
 resource "aws_security_group" "msk" {
   count       = var.msk_enabled ? 1 : 0
   name        = "${var.prefix}-msk-sg"
-  description = "MSK Serverless — IAM SASL 9098 desde debezium ECS + Databricks egress."
+  description = "MSK Serverless - IAM SASL 9098 from debezium ECS + Databricks egress."
   vpc_id      = aws_vpc.main.id
 
   ingress {

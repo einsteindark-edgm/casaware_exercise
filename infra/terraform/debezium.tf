@@ -16,9 +16,9 @@
 # publicar) + desired_count para encenderlo solo cuando queremos.
 
 variable "debezium_image" {
-  description = "Imagen Docker de Debezium Server. Oficial Docker Hub por ahora; mover a ECR propio si queremos control de supply chain."
+  description = "Imagen Docker de Debezium Server con aws-msk-iam-auth jar añadido. Buildeada desde debezium-image/Dockerfile."
   type        = string
-  default     = "debezium/server:3.0.0.Final"
+  default     = "525237381234.dkr.ecr.us-east-1.amazonaws.com/nexus-dev-edgm-debezium:3.0.0-msk-iam-v1"
 }
 
 variable "debezium_desired_count" {
@@ -66,9 +66,9 @@ data "aws_iam_policy_document" "debezium_task" {
       "kafka-cluster:DescribeTopicDynamicConfiguration",
       "kafka-cluster:AlterTopicDynamicConfiguration",
     ]
-    # MSK IAM resource ARNs cambian el último segmento a topic/<cluster>/<uuid>/<name>.
-    # Usamos wildcard sobre el cluster para cubrir todos los topics.
-    resources = [replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":topic/")]
+    # MSK IAM ARN para topic es arn:aws:kafka:region:account:topic/<cluster>/<uuid>/<topic-name>.
+    # Wildcard del nombre al final para cubrir todos los topics del cluster.
+    resources = ["${replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":topic/")}/*"]
   }
 
   statement {
@@ -78,7 +78,7 @@ data "aws_iam_policy_document" "debezium_task" {
       "kafka-cluster:AlterGroup",
       "kafka-cluster:DescribeGroup",
     ]
-    resources = [replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":group/")]
+    resources = ["${replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":group/")}/*"]
   }
 }
 
@@ -197,4 +197,26 @@ resource "aws_ecs_service" "debezium" {
   lifecycle {
     ignore_changes = [desired_count]
   }
+}
+
+# ── ECR repo para imagen custom de Debezium con aws-msk-iam-auth jar ─
+
+resource "aws_ecr_repository" "debezium" {
+  count                = var.msk_enabled ? 1 : 0
+  name                 = "${var.prefix}-debezium"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "debezium" {
+  count      = var.msk_enabled ? 1 : 0
+  repository = aws_ecr_repository.debezium[0].name
+  policy     = local.ecr_lifecycle_policy
+}
+
+output "debezium_ecr_url" {
+  value = var.msk_enabled ? aws_ecr_repository.debezium[0].repository_url : ""
 }

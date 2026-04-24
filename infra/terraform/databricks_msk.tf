@@ -27,6 +27,11 @@ locals {
 data "aws_iam_policy_document" "databricks_msk_trust" {
   count = local.databricks_msk_enabled ? 1 : 0
 
+  # NOTA: AWS rechaza el self-assume en CREATE porque el role aún no
+  # existe como principal válido. Mismo workaround que uc_access
+  # (databricks.tf:85-93): trust solo con UC master role en CREATE; el
+  # self-assume se agrega post-create via AWS CLI y terraform ignora
+  # cambios al assume_role_policy (lifecycle block de abajo).
   statement {
     sid     = "DatabricksAssume"
     effect  = "Allow"
@@ -39,18 +44,6 @@ data "aws_iam_policy_document" "databricks_msk_trust" {
       test     = "StringEquals"
       variable = "sts:ExternalId"
       values   = [var.databricks_uc_external_id]
-    }
-  }
-
-  # Self-assume: mismo workaround que uc_access. Terraform ignora
-  # cambios al trust post-creación; el update real va por AWS CLI.
-  statement {
-    sid     = "SelfAssume"
-    effect  = "Allow"
-    actions = ["sts:AssumeRole"]
-    principals {
-      type        = "AWS"
-      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.prefix}-msk-databricks"]
     }
   }
 }
@@ -85,7 +78,7 @@ data "aws_iam_policy_document" "databricks_msk_access" {
       "kafka-cluster:ReadData",
       "kafka-cluster:DescribeTopicDynamicConfiguration",
     ]
-    resources = [replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":topic/")]
+    resources = ["${replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":topic/")}/*"]
   }
 
   statement {
@@ -95,7 +88,7 @@ data "aws_iam_policy_document" "databricks_msk_access" {
       "kafka-cluster:AlterGroup",
       "kafka-cluster:DescribeGroup",
     ]
-    resources = [replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":group/")]
+    resources = ["${replace(aws_msk_serverless_cluster.nexus[0].arn, ":cluster/", ":group/")}/*"]
   }
 }
 
