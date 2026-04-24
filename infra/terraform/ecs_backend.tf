@@ -104,6 +104,8 @@ resource "aws_ecs_service" "backend" {
   ]
 
   lifecycle {
-    ignore_changes = [desired_count]
+    # task_definition is managed out-of-band by .github/workflows/build-and-push.yml
+    # (registers a new revision per push to main). See ecs_workers.tf for context.
+    ignore_changes = [desired_count, task_definition]
   }
 }
