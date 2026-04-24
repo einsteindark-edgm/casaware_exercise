@@ -35,9 +35,7 @@ targets:
     variables:
       catalog: "nexus_dev"
       mongodb_db: "nexus_dev"
-      # Reemplazar con el valor real tras `terraform output msk_bootstrap_servers`.
-      # Ejemplo: "boot-xxxxxx.c1.kafka-serverless.us-east-1.amazonaws.com:9098"
-      msk_bootstrap_servers: ""
+      msk_bootstrap_servers: "boot-lddwjvb7.c2.kafka-serverless.us-east-1.amazonaws.com:9098"
       msk_service_credential: "nexus-dev-edgm-msk-cred"
 
   prod:
