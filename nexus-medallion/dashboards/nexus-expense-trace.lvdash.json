@@ -1,0 +1,2793 @@
+{
+  "datasets": [
+    {
+      "name": "d_presence",
+      "displayName": "Presence per layer",
+      "queryLines": [
+        "SELECT 'bronze' AS layer, COUNT(*) AS rows, 1 AS sort_order\n",
+        "FROM   nexus_dev.bronze.mongodb_cdc_expenses\n",
+        "WHERE  expense_id = :p_expense_id\n",
+        "UNION ALL\n",
+        "SELECT 'silver', COUNT(*), 2 FROM nexus_dev.silver.expenses     WHERE expense_id = :p_expense_id\n",
+        "UNION ALL\n",
+        "SELECT 'gold',   COUNT(*), 3 FROM nexus_dev.gold.expense_audit  WHERE expense_id = :p_expense_id\n",
+        "ORDER BY sort_order\n"
+      ],
+      "parameters": [
+        {
+          "displayName": "expense_id",
+          "keyword": "p_expense_id",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "d_bronze_cdc_expense",
+      "displayName": "Bronze CDC (expenses)",
+      "queryLines": [
+        "SELECT __source_ts_ms, __op, __deleted, tenant_id, status, amount, currency, vendor,\n",
+        "       date, final_amount, final_vendor, final_date, created_at, updated_at, _cdc_ingestion_ts\n",
+        "FROM   nexus_dev.bronze.mongodb_cdc_expenses\n",
+        "WHERE  expense_id = :p_expense_id\n",
+        "ORDER BY __source_ts_ms\n"
+      ],
+      "parameters": [
+        {
+          "displayName": "expense_id",
+          "keyword": "p_expense_id",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "d_silver_expense",
+      "displayName": "Silver expense (current state)",
+      "queryLines": [
+        "SELECT expense_id, tenant_id, user_id, receipt_id, workflow_id,\n",
+        "       status, amount, currency, vendor, date, category,\n",
+        "       final_amount, final_currency, final_vendor, final_date,\n",
+        "       approved_at, created_at, updated_at\n",
+        "FROM   nexus_dev.silver.expenses\n",
+        "WHERE  expense_id = :p_expense_id\n"
+      ],
+      "parameters": [
+        {
+          "displayName": "expense_id",
+          "keyword": "p_expense_id",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "d_silver_ocr",
+      "displayName": "Silver OCR",
+      "queryLines": [
+        "SELECT expense_id, tenant_id, user_id,\n",
+        "       ocr_total, ocr_total_confidence,\n",
+        "       ocr_vendor, ocr_vendor_confidence,\n",
+        "       ocr_date, ocr_date_confidence,\n",
+        "       ocr_currency, avg_confidence, textract_raw_s3_key, extracted_at\n",
+        "FROM   nexus_dev.silver.ocr_extractions\n",
+        "WHERE  expense_id = :p_expense_id\n"
+      ],
+      "parameters": [
+        {
+          "displayName": "expense_id",
+          "keyword": "p_expense_id",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "d_silver_timeline",
+      "displayName": "Events timeline (silver)",
+      "queryLines": [
+        "SELECT created_at, event_type, actor, workflow_id, event_id\n",
+        "FROM   nexus_dev.silver.expense_events\n",
+        "WHERE  expense_id = :p_expense_id\n",
+        "ORDER BY created_at\n"
+      ],
+      "parameters": [
+        {
+          "displayName": "expense_id",
+          "keyword": "p_expense_id",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "d_silver_hitl",
+      "displayName": "HITL tasks",
+      "queryLines": [
+        "SELECT task_id, status, decision, resolved_by, resolved_at, created_at, workflow_id\n",
+        "FROM   nexus_dev.silver.hitl_events\n",
+        "WHERE  expense_id = :p_expense_id\n",
+        "ORDER BY created_at DESC\n"
+      ],
+      "parameters": [
+        {
+          "displayName": "expense_id",
+          "keyword": "p_expense_id",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "d_gold_audit",
+      "displayName": "Gold audit",
+      "queryLines": [
+        "SELECT tenant_id, expense_id, user_id, receipt_id,\n",
+        "       final_amount, final_currency, final_vendor, final_date,\n",
+        "       category, approved_at\n",
+        "FROM   nexus_dev.gold.expense_audit\n",
+        "WHERE  expense_id = :p_expense_id\n"
+      ],
+      "parameters": [
+        {
+          "displayName": "expense_id",
+          "keyword": "p_expense_id",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "d_bronze_receipt",
+      "displayName": "Bronze receipt",
+      "queryLines": [
+        "SELECT __source_ts_ms, __op, receipt_id, s3_key, content_type, size_bytes, uploaded_at\n",
+        "FROM   nexus_dev.bronze.mongodb_cdc_receipts\n",
+        "WHERE  expense_id = :p_expense_id\n",
+        "ORDER BY __source_ts_ms\n"
+      ],
+      "parameters": [
+        {
+          "displayName": "expense_id",
+          "keyword": "p_expense_id",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "d_all_ids",
+      "displayName": "All expense_ids (dropdown source)",
+      "queryLines": [
+        "SELECT expense_id, MAX(created_at) AS last_seen\n",
+        "FROM   nexus_dev.silver.expenses\n",
+        "GROUP BY expense_id\n",
+        "ORDER BY last_seen DESC\n",
+        "LIMIT 500\n"
+      ]
+    },
+    {
+      "name": "d_recent",
+      "displayName": "Latest 20 expenses",
+      "queryLines": [
+        "SELECT expense_id, tenant_id, status, amount, currency, vendor, created_at\n",
+        "FROM   nexus_dev.silver.expenses\n",
+        "ORDER BY created_at DESC\n",
+        "LIMIT 20\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "main",
+      "displayName": "Expense trace",
+      "layout": [
+        {
+          "widget": {
+            "name": "f_expense_id",
+            "queries": [
+              {
+                "name": "param_q_d_presence",
+                "query": {
+                  "datasetName": "d_presence",
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_q_d_bronze_cdc_expense",
+                "query": {
+                  "datasetName": "d_bronze_cdc_expense",
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_q_d_silver_expense",
+                "query": {
+                  "datasetName": "d_silver_expense",
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_q_d_silver_ocr",
+                "query": {
+                  "datasetName": "d_silver_ocr",
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_q_d_silver_timeline",
+                "query": {
+                  "datasetName": "d_silver_timeline",
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_q_d_silver_hitl",
+                "query": {
+                  "datasetName": "d_silver_hitl",
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_q_d_gold_audit",
+                "query": {
+                  "datasetName": "d_gold_audit",
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_q_d_bronze_receipt",
+                "query": {
+                  "datasetName": "d_bronze_receipt",
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "options_q_d_all_ids",
+                "query": {
+                  "datasetName": "d_all_ids",
+                  "fields": [
+                    {
+                      "name": "expense_id",
+                      "expression": "`expense_id`"
+                    },
+                    {
+                      "name": "expense_id_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "p_expense_id",
+                    "queryName": "param_q_d_presence"
+                  },
+                  {
+                    "parameterName": "p_expense_id",
+                    "queryName": "param_q_d_bronze_cdc_expense"
+                  },
+                  {
+                    "parameterName": "p_expense_id",
+                    "queryName": "param_q_d_silver_expense"
+                  },
+                  {
+                    "parameterName": "p_expense_id",
+                    "queryName": "param_q_d_silver_ocr"
+                  },
+                  {
+                    "parameterName": "p_expense_id",
+                    "queryName": "param_q_d_silver_timeline"
+                  },
+                  {
+                    "parameterName": "p_expense_id",
+                    "queryName": "param_q_d_silver_hitl"
+                  },
+                  {
+                    "parameterName": "p_expense_id",
+                    "queryName": "param_q_d_gold_audit"
+                  },
+                  {
+                    "parameterName": "p_expense_id",
+                    "queryName": "param_q_d_bronze_receipt"
+                  },
+                  {
+                    "fieldName": "expense_id",
+                    "displayName": "expense_id",
+                    "queryName": "options_q_d_all_ids"
+                  }
+                ]
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": ""
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "title": "Select an expense_id",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "w_recent",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_recent",
+                  "fields": [
+                    {
+                      "name": "expense_id",
+                      "expression": "`expense_id`"
+                    },
+                    {
+                      "name": "tenant_id",
+                      "expression": "`tenant_id`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "amount",
+                      "expression": "`amount`"
+                    },
+                    {
+                      "name": "currency",
+                      "expression": "`currency`"
+                    },
+                    {
+                      "name": "vendor",
+                      "expression": "`vendor`"
+                    },
+                    {
+                      "name": "created_at",
+                      "expression": "`created_at`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "allowHTMLByDefault": false,
+              "condensed": true,
+              "invisibleColumns": [],
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "withRowNumber": false,
+              "encodings": {
+                "columns": [
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "expense_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 0,
+                    "title": "expense_id",
+                    "displayName": "expense_id"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "tenant_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 1,
+                    "title": "tenant",
+                    "displayName": "tenant"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "status",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 2,
+                    "title": "status",
+                    "displayName": "status"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "amount",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 3,
+                    "title": "amount",
+                    "displayName": "amount",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "currency",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 4,
+                    "title": "ccy",
+                    "displayName": "ccy"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "vendor",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 5,
+                    "title": "vendor",
+                    "displayName": "vendor"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "created_at",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 6,
+                    "title": "created_at",
+                    "displayName": "created_at",
+                    "dateTimeFormat": "ll LTS"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Latest expenses (pick an ID from the dropdown above to trace it)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 6,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "w_presence",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_presence",
+                  "fields": [
+                    {
+                      "name": "layer",
+                      "expression": "`layer`"
+                    },
+                    {
+                      "name": "rows",
+                      "expression": "`rows`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "layer",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "manual",
+                      "values": [
+                        "bronze",
+                        "silver",
+                        "gold"
+                      ]
+                    }
+                  },
+                  "displayName": "layer"
+                },
+                "y": {
+                  "fieldName": "rows",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "rows"
+                }
+              },
+              "frame": {
+                "title": "Does this ID exist in each layer?",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "w_silver_expense",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_silver_expense",
+                  "fields": [
+                    {
+                      "name": "expense_id",
+                      "expression": "`expense_id`"
+                    },
+                    {
+                      "name": "tenant_id",
+                      "expression": "`tenant_id`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "amount",
+                      "expression": "`amount`"
+                    },
+                    {
+                      "name": "vendor",
+                      "expression": "`vendor`"
+                    },
+                    {
+                      "name": "date",
+                      "expression": "`date`"
+                    },
+                    {
+                      "name": "final_amount",
+                      "expression": "`final_amount`"
+                    },
+                    {
+                      "name": "final_vendor",
+                      "expression": "`final_vendor`"
+                    },
+                    {
+                      "name": "final_date",
+                      "expression": "`final_date`"
+                    },
+                    {
+                      "name": "approved_at",
+                      "expression": "`approved_at`"
+                    },
+                    {
+                      "name": "created_at",
+                      "expression": "`created_at`"
+                    },
+                    {
+                      "name": "updated_at",
+                      "expression": "`updated_at`"
+                    },
+                    {
+                      "name": "workflow_id",
+                      "expression": "`workflow_id`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "allowHTMLByDefault": false,
+              "condensed": true,
+              "invisibleColumns": [],
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "withRowNumber": false,
+              "encodings": {
+                "columns": [
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "expense_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 0,
+                    "title": "expense_id",
+                    "displayName": "expense_id"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "tenant_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 1,
+                    "title": "tenant",
+                    "displayName": "tenant"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "status",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 2,
+                    "title": "status",
+                    "displayName": "status"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "amount",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 3,
+                    "title": "user amount",
+                    "displayName": "user amount",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "vendor",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 4,
+                    "title": "user vendor",
+                    "displayName": "user vendor"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "date",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 5,
+                    "title": "user date",
+                    "displayName": "user date",
+                    "dateTimeFormat": "ll LTS"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "final_amount",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 6,
+                    "title": "final amount",
+                    "displayName": "final amount",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "final_vendor",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 7,
+                    "title": "final vendor",
+                    "displayName": "final vendor"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "final_date",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 8,
+                    "title": "final date",
+                    "displayName": "final date",
+                    "dateTimeFormat": "ll LTS"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "approved_at",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 9,
+                    "title": "approved_at",
+                    "displayName": "approved_at",
+                    "dateTimeFormat": "ll LTS"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "created_at",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 10,
+                    "title": "created_at",
+                    "displayName": "created_at",
+                    "dateTimeFormat": "ll LTS"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "updated_at",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 11,
+                    "title": "updated_at",
+                    "displayName": "updated_at",
+                    "dateTimeFormat": "ll LTS"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "workflow_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 12,
+                    "title": "workflow_id",
+                    "displayName": "workflow_id"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Silver \u2014 current state",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 10,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "w_silver_ocr",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_silver_ocr",
+                  "fields": [
+                    {
+                      "name": "ocr_total",
+                      "expression": "`ocr_total`"
+                    },
+                    {
+                      "name": "ocr_total_confidence",
+                      "expression": "`ocr_total_confidence`"
+                    },
+                    {
+                      "name": "ocr_vendor",
+                      "expression": "`ocr_vendor`"
+                    },
+                    {
+                      "name": "ocr_vendor_confidence",
+                      "expression": "`ocr_vendor_confidence`"
+                    },
+                    {
+                      "name": "ocr_date",
+                      "expression": "`ocr_date`"
+                    },
+                    {
+                      "name": "ocr_date_confidence",
+                      "expression": "`ocr_date_confidence`"
+                    },
+                    {
+                      "name": "avg_confidence",
+                      "expression": "`avg_confidence`"
+                    },
+                    {
+                      "name": "textract_raw_s3_key",
+                      "expression": "`textract_raw_s3_key`"
+                    },
+                    {
+                      "name": "extracted_at",
+                      "expression": "`extracted_at`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "allowHTMLByDefault": false,
+              "condensed": true,
+              "invisibleColumns": [],
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "withRowNumber": false,
+              "encodings": {
+                "columns": [
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "ocr_total",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 0,
+                    "title": "total",
+                    "displayName": "total",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "ocr_total_confidence",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 1,
+                    "title": "total conf %",
+                    "displayName": "total conf %",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "ocr_vendor",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 2,
+                    "title": "vendor",
+                    "displayName": "vendor"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "ocr_vendor_confidence",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 3,
+                    "title": "vendor conf %",
+                    "displayName": "vendor conf %",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "ocr_date",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 4,
+                    "title": "date",
+                    "displayName": "date",
+                    "dateTimeFormat": "ll LTS"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "ocr_date_confidence",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 5,
+                    "title": "date conf %",
+                    "displayName": "date conf %",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "avg_confidence",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 6,
+                    "title": "avg conf %",
+                    "displayName": "avg conf %",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "textract_raw_s3_key",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 7,
+                    "title": "textract s3_key",
+                    "displayName": "textract s3_key"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "extracted_at",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 8,
+                    "title": "extracted_at",
+                    "displayName": "extracted_at",
+                    "dateTimeFormat": "ll LTS"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "OCR extraction (silver)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "w_silver_hitl",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_silver_hitl",
+                  "fields": [
+                    {
+                      "name": "task_id",
+                      "expression": "`task_id`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "decision",
+                      "expression": "`decision`"
+                    },
+                    {
+                      "name": "resolved_by",
+                      "expression": "`resolved_by`"
+                    },
+                    {
+                      "name": "resolved_at",
+                      "expression": "`resolved_at`"
+                    },
+                    {
+                      "name": "created_at",
+                      "expression": "`created_at`"
+                    },
+                    {
+                      "name": "workflow_id",
+                      "expression": "`workflow_id`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "allowHTMLByDefault": false,
+              "condensed": true,
+              "invisibleColumns": [],
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "withRowNumber": false,
+              "encodings": {
+                "columns": [
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "task_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 0,
+                    "title": "task_id",
+                    "displayName": "task_id"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "status",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 1,
+                    "title": "status",
+                    "displayName": "status"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "decision",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 2,
+                    "title": "decision",
+                    "displayName": "decision"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "resolved_by",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 3,
+                    "title": "resolved_by",
+                    "displayName": "resolved_by"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "resolved_at",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 4,
+                    "title": "resolved_at",
+                    "displayName": "resolved_at",
+                    "dateTimeFormat": "ll LTS"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "created_at",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 5,
+                    "title": "created_at",
+                    "displayName": "created_at",
+                    "dateTimeFormat": "ll LTS"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "workflow_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 6,
+                    "title": "workflow_id",
+                    "displayName": "workflow_id"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "HITL tasks",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 16,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "w_silver_timeline",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_silver_timeline",
+                  "fields": [
+                    {
+                      "name": "created_at",
+                      "expression": "`created_at`"
+                    },
+                    {
+                      "name": "event_type",
+                      "expression": "`event_type`"
+                    },
+                    {
+                      "name": "actor",
+                      "expression": "`actor`"
+                    },
+                    {
+                      "name": "workflow_id",
+                      "expression": "`workflow_id`"
+                    },
+                    {
+                      "name": "event_id",
+                      "expression": "`event_id`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "allowHTMLByDefault": false,
+              "condensed": true,
+              "invisibleColumns": [],
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "withRowNumber": false,
+              "encodings": {
+                "columns": [
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "created_at",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 0,
+                    "title": "t",
+                    "displayName": "t",
+                    "dateTimeFormat": "ll LTS"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "event_type",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 1,
+                    "title": "event_type",
+                    "displayName": "event_type"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "actor",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 2,
+                    "title": "actor",
+                    "displayName": "actor"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "workflow_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 3,
+                    "title": "workflow_id",
+                    "displayName": "workflow_id"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "event_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 4,
+                    "title": "event_id",
+                    "displayName": "event_id"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Events timeline",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 22,
+            "width": 6,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "w_gold",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_gold_audit",
+                  "fields": [
+                    {
+                      "name": "tenant_id",
+                      "expression": "`tenant_id`"
+                    },
+                    {
+                      "name": "expense_id",
+                      "expression": "`expense_id`"
+                    },
+                    {
+                      "name": "final_amount",
+                      "expression": "`final_amount`"
+                    },
+                    {
+                      "name": "final_currency",
+                      "expression": "`final_currency`"
+                    },
+                    {
+                      "name": "final_vendor",
+                      "expression": "`final_vendor`"
+                    },
+                    {
+                      "name": "final_date",
+                      "expression": "`final_date`"
+                    },
+                    {
+                      "name": "category",
+                      "expression": "`category`"
+                    },
+                    {
+                      "name": "approved_at",
+                      "expression": "`approved_at`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "allowHTMLByDefault": false,
+              "condensed": true,
+              "invisibleColumns": [],
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "withRowNumber": false,
+              "encodings": {
+                "columns": [
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "tenant_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 0,
+                    "title": "tenant",
+                    "displayName": "tenant"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "expense_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 1,
+                    "title": "expense_id",
+                    "displayName": "expense_id"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "final_amount",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 2,
+                    "title": "amount",
+                    "displayName": "amount",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "final_currency",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 3,
+                    "title": "ccy",
+                    "displayName": "ccy"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "final_vendor",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 4,
+                    "title": "vendor",
+                    "displayName": "vendor"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "final_date",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 5,
+                    "title": "date",
+                    "displayName": "date",
+                    "dateTimeFormat": "ll LTS"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "category",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 6,
+                    "title": "category",
+                    "displayName": "category"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "approved_at",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 7,
+                    "title": "approved_at",
+                    "displayName": "approved_at",
+                    "dateTimeFormat": "ll LTS"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Gold \u2014 expense_audit",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 30,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "w_bronze_cdc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_bronze_cdc_expense",
+                  "fields": [
+                    {
+                      "name": "__source_ts_ms",
+                      "expression": "`__source_ts_ms`"
+                    },
+                    {
+                      "name": "__op",
+                      "expression": "`__op`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "amount",
+                      "expression": "`amount`"
+                    },
+                    {
+                      "name": "vendor",
+                      "expression": "`vendor`"
+                    },
+                    {
+                      "name": "final_amount",
+                      "expression": "`final_amount`"
+                    },
+                    {
+                      "name": "final_vendor",
+                      "expression": "`final_vendor`"
+                    },
+                    {
+                      "name": "_cdc_ingestion_ts",
+                      "expression": "`_cdc_ingestion_ts`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "allowHTMLByDefault": false,
+              "condensed": true,
+              "invisibleColumns": [],
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "withRowNumber": false,
+              "encodings": {
+                "columns": [
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "__source_ts_ms",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 0,
+                    "title": "src_ts_ms",
+                    "displayName": "src_ts_ms",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "__op",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 1,
+                    "title": "op",
+                    "displayName": "op"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "status",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 2,
+                    "title": "status",
+                    "displayName": "status"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "amount",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 3,
+                    "title": "amount",
+                    "displayName": "amount",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "vendor",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 4,
+                    "title": "vendor",
+                    "displayName": "vendor"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "final_amount",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 5,
+                    "title": "final_amount",
+                    "displayName": "final_amount",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "final_vendor",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 6,
+                    "title": "final_vendor",
+                    "displayName": "final_vendor"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "_cdc_ingestion_ts",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 7,
+                    "title": "ingest_ts",
+                    "displayName": "ingest_ts",
+                    "dateTimeFormat": "ll LTS"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Bronze CDC (all change events)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 35,
+            "width": 6,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "w_bronze_receipt",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_bronze_receipt",
+                  "fields": [
+                    {
+                      "name": "receipt_id",
+                      "expression": "`receipt_id`"
+                    },
+                    {
+                      "name": "s3_key",
+                      "expression": "`s3_key`"
+                    },
+                    {
+                      "name": "content_type",
+                      "expression": "`content_type`"
+                    },
+                    {
+                      "name": "size_bytes",
+                      "expression": "`size_bytes`"
+                    },
+                    {
+                      "name": "uploaded_at",
+                      "expression": "`uploaded_at`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "allowHTMLByDefault": false,
+              "condensed": true,
+              "invisibleColumns": [],
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "withRowNumber": false,
+              "encodings": {
+                "columns": [
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "receipt_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 0,
+                    "title": "receipt_id",
+                    "displayName": "receipt_id"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "s3_key",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 1,
+                    "title": "s3_key",
+                    "displayName": "s3_key"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "content_type",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 2,
+                    "title": "mime",
+                    "displayName": "mime"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "size_bytes",
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "order": 3,
+                    "title": "bytes",
+                    "displayName": "bytes",
+                    "numberFormat": "0,0.00"
+                  },
+                  {
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "visible": true,
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": true,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "fieldName": "uploaded_at",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "order": 4,
+                    "title": "uploaded_at",
+                    "displayName": "uploaded_at",
+                    "dateTimeFormat": "ll LTS"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "S3 receipt",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 43,
+            "width": 6,
+            "height": 4
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    }
+  }
+}

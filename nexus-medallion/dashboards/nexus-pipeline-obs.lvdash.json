@@ -1,0 +1,612 @@
+{
+  "datasets": [
+    {
+      "name": "d_approval_ratio",
+      "displayName": "Approval ratio",
+      "queryLines": [
+        "SELECT ROUND(100.0 * SUM(CASE WHEN status='approved' THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0), 1) AS approval_pct\n",
+        "FROM nexus_dev.silver.expenses\n",
+        "WHERE created_at >= current_date() - INTERVAL 7 DAY\n"
+      ]
+    },
+    {
+      "name": "d_hitl_pending",
+      "displayName": "HITL pending",
+      "queryLines": [
+        "SELECT COUNT(*) AS pending\n",
+        "FROM nexus_dev.silver.hitl_events\n",
+        "WHERE status = 'pending'\n"
+      ]
+    },
+    {
+      "name": "d_ocr_low_conf",
+      "displayName": "OCR low-confidence",
+      "queryLines": [
+        "SELECT COUNT(*) AS low_conf\n",
+        "FROM nexus_dev.silver.ocr_extractions\n",
+        "WHERE avg_confidence < 80\n",
+        "  AND extracted_at >= current_date() - INTERVAL 7 DAY\n"
+      ]
+    },
+    {
+      "name": "d_stuck_processing",
+      "displayName": "Workflows stuck",
+      "queryLines": [
+        "SELECT COUNT(*) AS stuck\n",
+        "FROM nexus_dev.silver.expenses\n",
+        "WHERE status = 'processing'\n",
+        "  AND updated_at < current_timestamp() - INTERVAL 10 MINUTE\n"
+      ]
+    },
+    {
+      "name": "d_expenses_by_day_status",
+      "displayName": "Expenses por día y status",
+      "queryLines": [
+        "SELECT DATE_TRUNC('day', created_at) AS day,\n",
+        "       status,\n",
+        "       COUNT(*) AS n\n",
+        "FROM   nexus_dev.silver.expenses\n",
+        "WHERE  created_at >= current_date() - INTERVAL 14 DAY\n",
+        "GROUP BY 1, 2\n",
+        "ORDER BY 1\n"
+      ]
+    },
+    {
+      "name": "d_freshness",
+      "displayName": "Frescura bronze → silver → gold",
+      "queryLines": [
+        "WITH b AS (\n",
+        "  SELECT expense_id, MAX(__source_ts_ms) AS bronze_ts_ms\n",
+        "  FROM nexus_dev.bronze.mongodb_cdc_expenses\n",
+        "  GROUP BY expense_id\n",
+        "),\n",
+        "s AS (\n",
+        "  SELECT expense_id, updated_at AS silver_ts, status\n",
+        "  FROM nexus_dev.silver.expenses\n",
+        "),\n",
+        "g AS (\n",
+        "  SELECT expense_id, approved_at AS gold_ts\n",
+        "  FROM nexus_dev.gold.expense_audit\n",
+        ")\n",
+        "SELECT b.expense_id,\n",
+        "       TIMESTAMP_MILLIS(b.bronze_ts_ms) AS bronze_latest,\n",
+        "       s.status,\n",
+        "       s.silver_ts,\n",
+        "       g.gold_ts,\n",
+        "       (unix_millis(s.silver_ts) - b.bronze_ts_ms)/1000.0 AS bronze_to_silver_sec,\n",
+        "       (unix_millis(g.gold_ts) - unix_millis(s.silver_ts))/1000.0 AS silver_to_gold_sec\n",
+        "FROM   b\n",
+        "LEFT JOIN s USING(expense_id)\n",
+        "LEFT JOIN g USING(expense_id)\n",
+        "ORDER BY bronze_latest DESC\n",
+        "LIMIT 50\n"
+      ]
+    },
+    {
+      "name": "d_last_expenses",
+      "displayName": "Últimos 20 expenses",
+      "queryLines": [
+        "SELECT expense_id, tenant_id, status, amount, currency, vendor, created_at, updated_at\n",
+        "FROM   nexus_dev.silver.expenses\n",
+        "ORDER BY created_at DESC\n",
+        "LIMIT 20\n"
+      ]
+    },
+    {
+      "name": "d_hitl_discrepancies",
+      "displayName": "Campos disputados en HITL",
+      "queryLines": [
+        "SELECT field, COUNT(*) AS n\n",
+        "FROM   nexus_dev.silver.hitl_events\n",
+        "LATERAL VIEW EXPLODE(discrepancy_fields) df AS field\n",
+        "WHERE  created_at >= current_date() - INTERVAL 30 DAY\n",
+        "GROUP BY field\n",
+        "ORDER BY n DESC\n"
+      ]
+    },
+    {
+      "name": "d_pipeline_fail_24h",
+      "displayName": "Pipeline fails 24h",
+      "queryLines": [
+        "SELECT COUNT(*) AS failed\n",
+        "FROM   system.lakeflow.pipeline_update_timeline t\n",
+        "JOIN   system.lakeflow.pipelines p ON t.pipeline_id = p.pipeline_id\n",
+        "WHERE  p.name LIKE '%nexus%'\n",
+        "  AND  t.result_state = 'FAILED'\n",
+        "  AND  t.period_start_time >= current_timestamp() - INTERVAL 24 HOUR\n"
+      ]
+    },
+    {
+      "name": "d_pipeline_success_rate",
+      "displayName": "Success rate 7d",
+      "queryLines": [
+        "SELECT ROUND(100.0*SUM(CASE WHEN result_state='COMPLETED' THEN 1 ELSE 0 END)/NULLIF(COUNT(*),0), 1) AS pct\n",
+        "FROM   system.lakeflow.pipeline_update_timeline t\n",
+        "JOIN   system.lakeflow.pipelines p ON t.pipeline_id = p.pipeline_id\n",
+        "WHERE  p.name LIKE '%nexus%'\n",
+        "  AND  t.period_start_time >= current_timestamp() - INTERVAL 7 DAY\n"
+      ]
+    },
+    {
+      "name": "d_pipeline_runs_timeline",
+      "displayName": "Pipeline runs timeline",
+      "queryLines": [
+        "SELECT DATE_TRUNC('hour', t.period_start_time) AS hour,\n",
+        "       CASE WHEN p.name LIKE '%bronze%' THEN 'bronze'\n",
+        "            WHEN p.name LIKE '%silver%' THEN 'silver'\n",
+        "            WHEN p.name LIKE '%gold%'   THEN 'gold'\n",
+        "            ELSE 'other' END                AS layer,\n",
+        "       t.result_state,\n",
+        "       COUNT(*)                              AS n\n",
+        "FROM   system.lakeflow.pipeline_update_timeline t\n",
+        "JOIN   system.lakeflow.pipelines p ON t.pipeline_id = p.pipeline_id\n",
+        "WHERE  p.name LIKE '%nexus%'\n",
+        "  AND  t.period_start_time >= current_timestamp() - INTERVAL 24 HOUR\n",
+        "GROUP BY 1, 2, 3\n",
+        "ORDER BY 1\n"
+      ]
+    },
+    {
+      "name": "d_last_pipeline_runs",
+      "displayName": "Últimos 30 runs",
+      "queryLines": [
+        "SELECT p.name                                                       AS pipeline,\n",
+        "       t.update_id,\n",
+        "       t.result_state,\n",
+        "       t.period_start_time,\n",
+        "       t.period_end_time,\n",
+        "       (unix_timestamp(t.period_end_time) - unix_timestamp(t.period_start_time)) AS duration_sec\n",
+        "FROM   system.lakeflow.pipeline_update_timeline t\n",
+        "JOIN   system.lakeflow.pipelines p ON t.pipeline_id = p.pipeline_id\n",
+        "WHERE  p.name LIKE '%nexus%'\n",
+        "ORDER BY t.period_start_time DESC\n",
+        "LIMIT  30\n"
+      ]
+    },
+    {
+      "name": "d_pipeline_errors",
+      "displayName": "Últimos errores (event_log)",
+      "queryLines": [
+        "SELECT 'gold' AS pipeline, timestamp, event_type,\n",
+        "       LEFT(regexp_replace(message, '[\\\\n\\\\r\\\\t]+', ' '), 250) AS message\n",
+        "FROM   event_log('caf4284f-2d27-429e-99ce-2506597b11c1') WHERE level='ERROR'\n",
+        "UNION ALL\n",
+        "SELECT 'silver', timestamp, event_type,\n",
+        "       LEFT(regexp_replace(message, '[\\\\n\\\\r\\\\t]+', ' '), 250)\n",
+        "FROM   event_log('ebf90ff0-d34e-43f6-b62d-8f4e7e74f71d') WHERE level='ERROR'\n",
+        "UNION ALL\n",
+        "SELECT 'bronze', timestamp, event_type,\n",
+        "       LEFT(regexp_replace(message, '[\\\\n\\\\r\\\\t]+', ' '), 250)\n",
+        "FROM   event_log('e65111c9-353f-45ad-9768-c2a6c22e9110') WHERE level='ERROR'\n",
+        "ORDER BY timestamp DESC LIMIT 15\n"
+      ]
+    },
+    {
+      "name": "d_layer_funnel",
+      "displayName": "Funnel bronze → silver → gold",
+      "queryLines": [
+        "SELECT 'bronze' AS layer, COUNT(*) AS n, 1 AS sort_order FROM nexus_dev.bronze.mongodb_cdc_expenses\n",
+        "UNION ALL\n",
+        "SELECT 'silver',          COUNT(*),      2                 FROM nexus_dev.silver.expenses\n",
+        "UNION ALL\n",
+        "SELECT 'gold',            COUNT(*),      3                 FROM nexus_dev.gold.expense_audit\n",
+        "ORDER BY sort_order\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "main",
+      "displayName": "Pipeline observability",
+      "layout": [
+        {
+          "widget": {
+            "name": "w_approval",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_approval_ratio",
+                  "fields": [
+                    { "name": "approval_pct", "expression": "`approval_pct`" }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "approval_pct",
+                  "displayName": "Aprobación 7d (%)",
+                  "format": { "type": "number-plain", "decimalPlaces": { "type": "exact", "places": 1 } }
+                }
+              },
+              "frame": { "title": "Aprobación 7d", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 0, "width": 2, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "w_hitl_pending",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_hitl_pending",
+                  "fields": [ { "name": "pending", "expression": "`pending`" } ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": { "value": { "fieldName": "pending", "displayName": "HITL pendientes" } },
+              "frame": { "title": "HITL pendientes", "showTitle": true }
+            }
+          },
+          "position": { "x": 2, "y": 0, "width": 2, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "w_ocr_low",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_ocr_low_conf",
+                  "fields": [ { "name": "low_conf", "expression": "`low_conf`" } ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": { "value": { "fieldName": "low_conf", "displayName": "OCR < 80% (7d)" } },
+              "frame": { "title": "OCR baja confianza", "showTitle": true }
+            }
+          },
+          "position": { "x": 4, "y": 0, "width": 2, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "w_stuck",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_stuck_processing",
+                  "fields": [ { "name": "stuck", "expression": "`stuck`" } ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": { "value": { "fieldName": "stuck", "displayName": "Stuck >10 min" } },
+              "frame": { "title": "Workflows stuck", "showTitle": true }
+            }
+          },
+          "position": { "x": 4, "y": 3, "width": 2, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "w_expenses_by_day",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_expenses_by_day_status",
+                  "fields": [
+                    { "name": "day", "expression": "`day`" },
+                    { "name": "status", "expression": "`status`" },
+                    { "name": "n", "expression": "`n`" }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": { "fieldName": "day", "scale": { "type": "temporal" }, "displayName": "día" },
+                "y": { "fieldName": "n", "scale": { "type": "quantitative" }, "displayName": "expenses" },
+                "color": {
+                  "fieldName": "status",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      { "value": "approved",      "color": "#00A972" },
+                      { "value": "pending",       "color": "#8BCAE7" },
+                      { "value": "processing",    "color": "#FFAB00" },
+                      { "value": "hitl_required", "color": "#FCA4A1" },
+                      { "value": "rejected",      "color": "#FF3621" },
+                      { "value": "failed",        "color": "#919191" }
+                    ]
+                  },
+                  "displayName": "status"
+                }
+              },
+              "frame": { "title": "Expenses por día (14d)", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 3, "width": 4, "height": 6 }
+        },
+        {
+          "widget": {
+            "name": "w_last_expenses",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_last_expenses",
+                  "fields": [
+                    { "name": "expense_id", "expression": "`expense_id`" },
+                    { "name": "tenant_id",  "expression": "`tenant_id`"  },
+                    { "name": "status",     "expression": "`status`"     },
+                    { "name": "amount",     "expression": "`amount`"     },
+                    { "name": "currency",   "expression": "`currency`"   },
+                    { "name": "vendor",     "expression": "`vendor`"     },
+                    { "name": "created_at", "expression": "`created_at`" },
+                    { "name": "updated_at", "expression": "`updated_at`" }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  { "fieldName": "expense_id", "type": "string",   "displayName": "expense_id", "order": 0, "visible": true },
+                  { "fieldName": "tenant_id",  "type": "string",   "displayName": "tenant",     "order": 1, "visible": true },
+                  { "fieldName": "status",     "type": "string",   "displayName": "status",     "order": 2, "visible": true },
+                  { "fieldName": "amount",     "type": "float",    "displayName": "amount",     "order": 3, "visible": true },
+                  { "fieldName": "currency",   "type": "string",   "displayName": "currency",   "order": 4, "visible": true },
+                  { "fieldName": "vendor",     "type": "string",   "displayName": "vendor",     "order": 5, "visible": true },
+                  { "fieldName": "created_at", "type": "datetime", "displayName": "created_at", "order": 6, "visible": true },
+                  { "fieldName": "updated_at", "type": "datetime", "displayName": "updated_at", "order": 7, "visible": true }
+                ]
+              },
+              "frame": { "title": "Últimos 20 expenses", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 9, "width": 6, "height": 8 }
+        },
+        {
+          "widget": {
+            "name": "w_hitl_discrepancies",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_hitl_discrepancies",
+                  "fields": [
+                    { "name": "field", "expression": "`field`" },
+                    { "name": "n",     "expression": "`n`"     }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": { "fieldName": "n",     "scale": { "type": "quantitative" }, "displayName": "ocurrencias" },
+                "y": { "fieldName": "field", "scale": { "type": "categorical" },  "displayName": "campo" }
+              },
+              "frame": { "title": "Campos disputados HITL (30d)", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 17, "width": 3, "height": 6 }
+        },
+        {
+          "widget": {
+            "name": "w_pipeline_fail_24h",
+            "queries": [
+              { "name": "main_query", "query": { "datasetName": "d_pipeline_fail_24h",
+                "fields": [ { "name": "failed", "expression": "`failed`" } ], "disaggregated": true } }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": { "value": { "fieldName": "failed", "displayName": "Pipeline fails 24h" } },
+              "frame": { "title": "Pipeline fails 24h", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 25, "width": 2, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "w_pipeline_success_rate",
+            "queries": [
+              { "name": "main_query", "query": { "datasetName": "d_pipeline_success_rate",
+                "fields": [ { "name": "pct", "expression": "`pct`" } ], "disaggregated": true } }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": { "value": { "fieldName": "pct", "displayName": "Success 7d (%)",
+                "format": { "type": "number-plain", "decimalPlaces": { "type": "exact", "places": 1 } } } },
+              "frame": { "title": "Pipeline success 7d", "showTitle": true }
+            }
+          },
+          "position": { "x": 2, "y": 25, "width": 2, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "w_layer_funnel",
+            "queries": [
+              { "name": "main_query", "query": { "datasetName": "d_layer_funnel",
+                "fields": [
+                  { "name": "layer", "expression": "`layer`" },
+                  { "name": "n",     "expression": "`n`"     }
+                ], "disaggregated": true } }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": { "fieldName": "layer", "scale": { "type": "categorical",
+                  "sort": { "by": "manual", "values": ["bronze","silver","gold"] } }, "displayName": "layer" },
+                "y": { "fieldName": "n", "scale": { "type": "quantitative" }, "displayName": "registros" }
+              },
+              "frame": { "title": "Funnel bronze → silver → gold", "showTitle": true }
+            }
+          },
+          "position": { "x": 4, "y": 25, "width": 2, "height": 6 }
+        },
+        {
+          "widget": {
+            "name": "w_pipeline_runs_timeline",
+            "queries": [
+              { "name": "main_query", "query": { "datasetName": "d_pipeline_runs_timeline",
+                "fields": [
+                  { "name": "hour",         "expression": "`hour`"         },
+                  { "name": "layer",        "expression": "`layer`"        },
+                  { "name": "result_state", "expression": "`result_state`" },
+                  { "name": "n",            "expression": "`n`"            }
+                ], "disaggregated": true } }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": { "fieldName": "hour", "scale": { "type": "temporal" },     "displayName": "hora" },
+                "y": { "fieldName": "n",    "scale": { "type": "quantitative" }, "displayName": "runs" },
+                "color": {
+                  "fieldName": "result_state",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      { "value": "COMPLETED", "color": "#00A972" },
+                      { "value": "FAILED",    "color": "#FF3621" },
+                      { "value": "CANCELED",  "color": "#919191" },
+                      { "value": "RUNNING",   "color": "#FFAB00" }
+                    ]
+                  },
+                  "displayName": "estado"
+                }
+              },
+              "frame": { "title": "Pipeline runs últimas 24 h", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 28, "width": 4, "height": 6 }
+        },
+        {
+          "widget": {
+            "name": "w_last_pipeline_runs",
+            "queries": [
+              { "name": "main_query", "query": { "datasetName": "d_last_pipeline_runs",
+                "fields": [
+                  { "name": "pipeline",            "expression": "`pipeline`"            },
+                  { "name": "update_id",           "expression": "`update_id`"           },
+                  { "name": "result_state",        "expression": "`result_state`"        },
+                  { "name": "period_start_time",   "expression": "`period_start_time`"   },
+                  { "name": "period_end_time",     "expression": "`period_end_time`"     },
+                  { "name": "duration_sec",        "expression": "`duration_sec`"        }
+                ], "disaggregated": true } }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  { "fieldName": "pipeline",          "type": "string",   "displayName": "pipeline",  "order": 0, "visible": true },
+                  { "fieldName": "result_state",      "type": "string",   "displayName": "estado",    "order": 1, "visible": true },
+                  { "fieldName": "period_start_time", "type": "datetime", "displayName": "inicio",    "order": 2, "visible": true },
+                  { "fieldName": "period_end_time",   "type": "datetime", "displayName": "fin",       "order": 3, "visible": true },
+                  { "fieldName": "duration_sec",      "type": "integer",  "displayName": "dur (s)",   "order": 4, "visible": true },
+                  { "fieldName": "update_id",         "type": "string",   "displayName": "update_id", "order": 5, "visible": true }
+                ]
+              },
+              "frame": { "title": "Últimos 30 runs", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 34, "width": 6, "height": 8 }
+        },
+        {
+          "widget": {
+            "name": "w_pipeline_errors",
+            "queries": [
+              { "name": "main_query", "query": { "datasetName": "d_pipeline_errors",
+                "fields": [
+                  { "name": "pipeline",   "expression": "`pipeline`"   },
+                  { "name": "timestamp",  "expression": "`timestamp`"  },
+                  { "name": "event_type", "expression": "`event_type`" },
+                  { "name": "message",    "expression": "`message`"    }
+                ], "disaggregated": true } }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  { "fieldName": "pipeline",   "type": "string",   "displayName": "pipeline",   "order": 0, "visible": true },
+                  { "fieldName": "timestamp",  "type": "datetime", "displayName": "timestamp",  "order": 1, "visible": true },
+                  { "fieldName": "event_type", "type": "string",   "displayName": "event_type", "order": 2, "visible": true },
+                  { "fieldName": "message",    "type": "string",   "displayName": "message",    "order": 3, "visible": true }
+                ]
+              },
+              "frame": { "title": "Errores recientes (event_log)", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 42, "width": 6, "height": 8 }
+        },
+        {
+          "widget": {
+            "name": "w_freshness",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d_freshness",
+                  "fields": [
+                    { "name": "expense_id",           "expression": "`expense_id`"           },
+                    { "name": "bronze_latest",        "expression": "`bronze_latest`"        },
+                    { "name": "status",               "expression": "`status`"               },
+                    { "name": "silver_ts",            "expression": "`silver_ts`"            },
+                    { "name": "gold_ts",              "expression": "`gold_ts`"              },
+                    { "name": "bronze_to_silver_sec", "expression": "`bronze_to_silver_sec`" },
+                    { "name": "silver_to_gold_sec",   "expression": "`silver_to_gold_sec`"   }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  { "fieldName": "expense_id",           "type": "string",   "displayName": "expense_id", "order": 0, "visible": true },
+                  { "fieldName": "bronze_latest",        "type": "datetime", "displayName": "bronze",     "order": 1, "visible": true },
+                  { "fieldName": "status",               "type": "string",   "displayName": "status",     "order": 2, "visible": true },
+                  { "fieldName": "silver_ts",            "type": "datetime", "displayName": "silver",     "order": 3, "visible": true },
+                  { "fieldName": "gold_ts",              "type": "datetime", "displayName": "gold",       "order": 4, "visible": true },
+                  { "fieldName": "bronze_to_silver_sec", "type": "float",    "displayName": "B→S (s)",    "order": 5, "visible": true },
+                  { "fieldName": "silver_to_gold_sec",   "type": "float",    "displayName": "S→G (s)",    "order": 6, "visible": true }
+                ]
+              },
+              "frame": { "title": "Frescura medallion (últimos 50)", "showTitle": true }
+            }
+          },
+          "position": { "x": 3, "y": 17, "width": 3, "height": 8 }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ],
+  "uiSettings": {
+    "theme": { "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED" }
+  }
+}

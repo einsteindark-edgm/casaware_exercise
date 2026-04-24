@@ -5,16 +5,32 @@
 # MAGIC Promocion reactiva: cuando `silver.expenses.status = 'approved'`,
 # MAGIC materializa una fila aqui. Todos los campos `final_*` ya vienen
 # MAGIC embebidos desde el Worker (no hay joins de enriquecimiento en Gold).
+# MAGIC
+# MAGIC **NOTA:** este nodo es un materialized view (no streaming) porque su
+# MAGIC fuente `silver.expenses` se escribe con `apply_changes` (MERGE/SCD1).
+# MAGIC Un streaming source de Delta falla con DELTA_SOURCE_TABLE_IGNORE_CHANGES
+# MAGIC al detectar updates — lo comprobamos en prod en abril 2026: 5 updates
+# MAGIC seguidos del pipeline gold fallaron con ese mismo error. La opción
+# MAGIC `skipChangeCommits=true` NO sirve porque el evento que promueve a gold
+# MAGIC es justamente el update a status=approved.
 
 # COMMAND ----------
 import dlt
 from pyspark.sql.functions import coalesce, col
 
 
-@dlt.view
-def v_approved_expenses():
+@dlt.table(
+    name="expense_audit",
+    comment="Un registro por expense aprobado. BI, RAG y reportes consumen desde aqui.",
+    table_properties={
+        "quality": "gold",
+        "delta.enableChangeDataFeed": "true",
+    },
+    cluster_by=["tenant_id", "final_date"],
+)
+def expense_audit():
     return (
-        dlt.read_stream("silver.expenses")
+        dlt.read("silver.expenses")
         .where("status = 'approved'")
         .select(
             "tenant_id",
@@ -32,22 +48,3 @@ def v_approved_expenses():
             coalesce(col("approved_at"), col("updated_at")).alias("approved_at"),
         )
     )
-
-
-dlt.create_streaming_table(
-    name="expense_audit",
-    comment="Un registro por expense aprobado. BI, RAG y reportes consumen desde aqui.",
-    table_properties={
-        "quality": "gold",
-        "delta.enableChangeDataFeed": "true",
-    },
-    cluster_by=["tenant_id", "final_date"],
-)
-
-dlt.apply_changes(
-    target="expense_audit",
-    source="v_approved_expenses",
-    keys=["expense_id"],
-    sequence_by=col("approved_at"),
-    stored_as_scd_type="1",
-)
