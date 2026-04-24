@@ -150,6 +150,9 @@ async def run_worker(task_queue: str) -> None:
         workflows=[getattr(w, "__name__", str(w)) for w in workflows],
         activities_count=len(activities),
         fake_providers=settings.fake_providers,
+        fake_textract=settings.use_fake_textract,
+        fake_bedrock=settings.use_fake_bedrock,
+        fake_vector_search=settings.use_fake_vector_search,
     )
 
     client = await Client.connect(

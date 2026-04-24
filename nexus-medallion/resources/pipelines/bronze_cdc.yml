@@ -1,0 +1,27 @@
+resources:
+  pipelines:
+    bronze_cdc_pipeline:
+      name: "nexus-bronze-cdc-${var.catalog}"
+      catalog: ${var.catalog}
+      target: "bronze"
+      # Triggered: el job de abajo lo dispara cada 5 min. Cambiar a
+      # continuous=true cuando querramos latencia <30s constante (cuesta mas).
+      continuous: false
+      development: true
+      serverless: true
+
+      libraries:
+        - notebook:
+            path: ../../src/bronze/cdc_expenses.py
+        - notebook:
+            path: ../../src/bronze/cdc_receipts.py
+        - notebook:
+            path: ../../src/bronze/cdc_hitl_tasks.py
+        - notebook:
+            path: ../../src/bronze/cdc_ocr_extractions.py
+        - notebook:
+            path: ../../src/bronze/cdc_expense_events.py
+
+      configuration:
+        nexus.catalog: ${var.catalog}
+        nexus.cdc_bucket: ${var.cdc_bucket}

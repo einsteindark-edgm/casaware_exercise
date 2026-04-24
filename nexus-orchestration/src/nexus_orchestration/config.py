@@ -43,9 +43,11 @@ class Settings(BaseSettings):
     # Fake mode: stub external providers (Textract / Bedrock / Vector Search)
     fake_providers: bool = True
 
-    # Per-provider override: let RAG use real Databricks Vector Search while
-    # Textract/Bedrock still run fake (useful while no AWS/Anthropic quota).
-    # Default mirrors fake_providers; set FAKE_VECTOR_SEARCH=false to unlock VS.
+    # Per-provider overrides. When unset, each falls back to fake_providers.
+    # Lets you unlock providers individually as credentials become available.
+    # e.g. FAKE_TEXTRACT=false (+ real AWS keys) while Bedrock/VS stay fake.
+    fake_textract: bool | None = None
+    fake_bedrock: bool | None = None
     fake_vector_search: bool | None = None
 
     # When fake_providers=True, controls how fake Textract compares against the
@@ -75,8 +77,19 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     @property
+    def use_fake_textract(self) -> bool:
+        if self.fake_textract is None:
+            return self.fake_providers
+        return self.fake_textract
+
+    @property
+    def use_fake_bedrock(self) -> bool:
+        if self.fake_bedrock is None:
+            return self.fake_providers
+        return self.fake_bedrock
+
+    @property
     def use_fake_vector_search(self) -> bool:
-        """Granular override. When unset, follows global fake_providers."""
         if self.fake_vector_search is None:
             return self.fake_providers
         return self.fake_vector_search

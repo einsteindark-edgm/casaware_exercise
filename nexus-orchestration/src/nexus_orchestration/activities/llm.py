@@ -55,7 +55,7 @@ async def bedrock_converse(inp: dict[str, Any]) -> dict[str, Any]:
         tenant_id, user_id, workflow_id
       }
     """
-    if settings.fake_providers:
+    if settings.use_fake_bedrock:
         redis_client = _get_redis() if inp.get("stream_to_redis") else None
         return await fake_bedrock_stream(
             messages=inp["messages"],

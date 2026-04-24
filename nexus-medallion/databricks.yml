@@ -19,6 +19,9 @@ variables:
   mongodb_db:
     description: "MongoDB database name to seed from."
     default: "nexus_dev"
+  cdc_bucket:
+    description: "S3 bucket donde nexus-cdc escribe JSONL.gz para Autoloader."
+    default: "nexus-dev-edgm-cdc"
 
 targets:
   dev:
@@ -29,6 +32,7 @@ targets:
     variables:
       catalog: "nexus_dev"
       mongodb_db: "nexus_dev"
+      cdc_bucket: "nexus-dev-edgm-cdc"
 
   prod:
     mode: production
@@ -37,3 +41,4 @@ targets:
     variables:
       catalog: "nexus_prod"
       mongodb_db: "nexus_prod"
+      cdc_bucket: "nexus-prod-edgm-cdc"

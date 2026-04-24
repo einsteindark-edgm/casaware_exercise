@@ -5,10 +5,40 @@ configurable tolerances. Returns the list of conflicts (empty when aligned).
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from rapidfuzz import fuzz
 from temporalio import activity
+
+
+_CURRENCY_STRIP = re.compile(r"[^\d,.\-]")
+
+
+def _parse_amount(value: Any) -> float:
+    """Parse OCR/user amount. Textract returns strings like "24,395.00 COP".
+
+    Heuristic: strip non-numeric/non-separator chars, then decide which
+    separator is the decimal based on which appears last. Avoids a crash
+    when the upstream field is a currency string instead of a clean number.
+    """
+    if value is None or value == "":
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = _CURRENCY_STRIP.sub("", str(value)).strip()
+    if not s:
+        return 0.0
+    last_dot = s.rfind(".")
+    last_comma = s.rfind(",")
+    if last_comma > last_dot:
+        s = s.replace(".", "").replace(",", ".")
+    else:
+        s = s.replace(",", "")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
 
 
 @activity.defn(name="compare_fields")
@@ -20,9 +50,9 @@ async def compare_fields(inp: dict[str, Any]) -> dict[str, Any]:
     conflicts: list[dict[str, Any]] = []
 
     # amount — percentage tolerance
-    user_amount = float(user.get("amount") or 0)
+    user_amount = _parse_amount(user.get("amount"))
     ocr_amount_field = ocr.get("ocr_total", {}) or {}
-    ocr_amount = float(ocr_amount_field.get("value") or 0)
+    ocr_amount = _parse_amount(ocr_amount_field.get("value"))
     if user_amount and ocr_amount:
         diff_pct = abs(user_amount - ocr_amount) / max(user_amount, ocr_amount)
         if diff_pct > tol["amount_pct"]:

@@ -30,7 +30,11 @@ class AuditValidationWorkflow:
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
 
-        # 2) Compare (pure function, no LLM).
+        # 2) Compare (pure function, no LLM). Pure & deterministic → retrying on
+        # failure can't help, cap to 2 attempts so a permanent bug (like the
+        # "could not convert string to float: '24,395.00 COP'" regression we
+        # hit in prod) fails the workflow fast instead of looping for hours
+        # and flooding the worker log.
         comparison = await workflow.execute_activity(
             "compare_fields",
             {
@@ -39,6 +43,7 @@ class AuditValidationWorkflow:
                 "tolerance": {"amount_pct": 0.01, "vendor_similarity_min": 0.85},
             },
             start_to_close_timeout=timedelta(seconds=5),
+            retry_policy=RetryPolicy(maximum_attempts=2),
         )
 
         parent_workflow_id = _parent_workflow_id()

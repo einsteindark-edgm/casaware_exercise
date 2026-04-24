@@ -2,6 +2,21 @@
 # MAGIC %md
 # MAGIC # Seed bronze tables desde MongoDB Atlas
 # MAGIC
+# MAGIC > ⚠️ **DEPRECATED — Phase B (2026-04-24).**
+# MAGIC > El CDC listener (`nexus-cdc/`) corre continuo y reemplaza a este notebook.
+# MAGIC > Las tablas `bronze.mongodb_cdc_*` ahora son gestionadas por el pipeline
+# MAGIC > `bronze_cdc_pipeline` (Autoloader) — NO correr este seed en ese entorno
+# MAGIC > o creará un conflicto de MANAGED vs DLT-managed tables.
+# MAGIC >
+# MAGIC > **Único caso de uso vivo:** emergency re-bootstrap cuando el listener
+# MAGIC > lleva >24h caído y Mongo Atlas oplog retention expiró. En ese caso:
+# MAGIC > 1. Drop las 5 `bronze.mongodb_cdc_*` con `DROP TABLE ... PURGE`.
+# MAGIC > 2. Borrar `s3://nexus-dev-edgm-cdc/_autoloader_state/` y DDB offsets.
+# MAGIC > 3. Correr este notebook como seed de emergencia.
+# MAGIC > 4. Re-arrancar `nexus-cdc` ECS service (bootstrap auto-recupera desde empty DDB).
+# MAGIC >
+# MAGIC > Ver `infra/plans/phase-b.md` §Runbooks.
+# MAGIC
 # MAGIC One-shot. Lee 5 colecciones de Mongo Atlas y las escribe como
 # MAGIC tablas Delta en `${catalog}.bronze.mongodb_cdc_*`.
 

@@ -144,6 +144,24 @@ data "aws_iam_policy_document" "uc_access" {
       "${aws_s3_bucket.textract_output.arn}/*",
     ]
   }
+
+  # Phase B: UC tambien necesita leer el bucket CDC + escribir el
+  # directorio _autoloader_state/ donde Autoloader mantiene checkpoints.
+  statement {
+    sid    = "S3CDCReadWrite"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject",
+      "s3:ListBucket",
+      "s3:GetBucketLocation",
+    ]
+    resources = [
+      aws_s3_bucket.cdc.arn,
+      "${aws_s3_bucket.cdc.arn}/*",
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "uc_access" {
@@ -173,6 +191,15 @@ resource "databricks_external_location" "uc_root" {
   url             = "s3://${aws_s3_bucket.uc_root[0].bucket}/"
   credential_name = databricks_storage_credential.nexus_uc[0].name
   comment         = "Managed location for catalog ${var.databricks_catalog_name}."
+}
+
+# Phase B: external location para que Autoloader pueda leer el bucket CDC.
+resource "databricks_external_location" "cdc" {
+  count           = var.databricks_enabled ? 1 : 0
+  name            = "${var.prefix}-cdc"
+  url             = "s3://${aws_s3_bucket.cdc.bucket}/"
+  credential_name = databricks_storage_credential.nexus_uc[0].name
+  comment         = "CDC landing bucket consumed by Autoloader (Phase B)."
 }
 
 # ── Catalog + schemas ────────────────────────────────────────────────

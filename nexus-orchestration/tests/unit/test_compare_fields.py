@@ -119,4 +119,41 @@ async def test_missing_ocr_amount_skipped():
     assert result["fields_in_conflict"] == []
 
 
+@pytest.mark.asyncio
+async def test_ocr_amount_currency_string_parsed():
+    # Textract AnalyzeExpense returns TOTAL as a formatted string with
+    # thousands separator + currency code (e.g. "24,395.00 COP"). Previously
+    # this crashed compare_fields with ValueError: could not convert string to
+    # float. The tolerant parser must handle it.
+    result = await compare_fields(
+        {
+            "user_reported": {"amount": 24395.0, "vendor": "Starbucks", "date": "2026-04-22"},
+            "ocr_extracted": {
+                "ocr_total": {"value": "24,395.00 COP", "confidence": 99.9},
+                "ocr_vendor": {"value": "Starbucks", "confidence": 96.0},
+                "ocr_date": {"value": "2026-04-22", "confidence": 91.0},
+            },
+            "tolerance": _TOL,
+        }
+    )
+    assert result["fields_in_conflict"] == []
+
+
+@pytest.mark.asyncio
+async def test_ocr_amount_european_format():
+    # European format: "24.395,00 €" — comma as decimal, dot as thousands.
+    result = await compare_fields(
+        {
+            "user_reported": {"amount": 24395.0, "vendor": "Starbucks", "date": "2026-04-22"},
+            "ocr_extracted": {
+                "ocr_total": {"value": "24.395,00 €", "confidence": 99.9},
+                "ocr_vendor": {"value": "Starbucks", "confidence": 96.0},
+                "ocr_date": {"value": "2026-04-22", "confidence": 91.0},
+            },
+            "tolerance": _TOL,
+        }
+    )
+    assert result["fields_in_conflict"] == []
+
+
 _ = _run  # referenced for conditional sync helpers (unused currently)

@@ -97,6 +97,24 @@ data "aws_iam_policy_document" "gha_terraform_policy" {
     resources = ["*"]
   }
 
+  # Frontend build-args are sourced from SSM at GHA build time. Without
+  # this permission the `aws ssm get-parameter` call silently returned
+  # empty strings, which baked `NEXT_PUBLIC_COGNITO_USER_POOL_ID=""` into
+  # the static bundle and produced "Auth UserPool not configured" in the
+  # browser. See `.github/workflows/build-and-push.yml` step `fetch
+  # frontend build-args from SSM`.
+  statement {
+    sid    = "SsmReadBuildArgs"
+    effect = "Allow"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+    ]
+    resources = [
+      "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.prefix}/*",
+    ]
+  }
+
   statement {
     sid    = "EcrPushPull"
     effect = "Allow"
@@ -114,6 +132,7 @@ data "aws_iam_policy_document" "gha_terraform_policy" {
     resources = [
       aws_ecr_repository.backend.arn,
       aws_ecr_repository.frontend.arn,
+      aws_ecr_repository.worker.arn,
     ]
   }
 

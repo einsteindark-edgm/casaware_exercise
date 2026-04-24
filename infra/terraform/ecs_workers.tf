@@ -44,11 +44,14 @@ resource "aws_ecs_task_definition" "worker" {
       { name = "REDIS_TLS", value = "false" },
       { name = "S3_RECEIPTS_BUCKET", value = aws_s3_bucket.receipts.bucket },
       { name = "S3_TEXTRACT_OUTPUT_BUCKET", value = aws_s3_bucket.textract_output.bucket },
+      # Global fallback. Cada provider tiene override granular debajo;
+      # pon "false" aqui el dia que los tres proveedores reales esten activos.
       { name = "FAKE_PROVIDERS", value = "true" },
       { name = "FAKE_HITL_MODE", value = "force" },
-      # Phase C: Vector Search real mientras Textract/Bedrock siguen fake.
-      # Flip a "false" una vez que el index Databricks este poblado.
-      { name = "FAKE_VECTOR_SEARCH", value = "true" },
+      # Per-provider overrides. Flip a "false" conforme cada uno este listo.
+      { name = "FAKE_TEXTRACT", value = "false" },       # real (Phase D)
+      { name = "FAKE_BEDROCK", value = "true" },         # pendiente credenciales
+      { name = "FAKE_VECTOR_SEARCH", value = "true" },   # pendiente C.7 index poblado
       { name = "AUDIT_SOURCE", value = "mongo" },
       { name = "LOG_LEVEL", value = "INFO" },
       { name = "WORKER_MAX_CONCURRENT_ACTIVITIES", value = "20" },

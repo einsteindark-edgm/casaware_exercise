@@ -6,13 +6,14 @@ on:
     paths:
       - "backend/**"
       - "frontend/**"
+      - "nexus-orchestration/**"
       - ".github/workflows/build-and-push.yml"
   workflow_dispatch:
     inputs:
       service:
-        description: "Which service to build (backend, frontend, or all)"
+        description: "Which service to build (backend, frontend, worker, or all)"
         type: choice
-        options: [all, backend, frontend]
+        options: [all, backend, frontend, worker]
         default: all
 
 permissions:
@@ -32,6 +33,7 @@ jobs:
     outputs:
       backend: ${{ steps.changes.outputs.backend }}
       frontend: ${{ steps.changes.outputs.frontend }}
+      worker: ${{ steps.changes.outputs.worker }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,6 +46,7 @@ jobs:
             svc="${{ inputs.service }}"
             echo "backend=$([ "$svc" = "all" ] || [ "$svc" = "backend" ] && echo true || echo false)" >> $GITHUB_OUTPUT
             echo "frontend=$([ "$svc" = "all" ] || [ "$svc" = "frontend" ] && echo true || echo false)" >> $GITHUB_OUTPUT
+            echo "worker=$([ "$svc" = "all" ] || [ "$svc" = "worker" ] && echo true || echo false)" >> $GITHUB_OUTPUT
             exit 0
           fi
           if git diff --name-only HEAD^ HEAD | grep -q '^backend/'; then
@@ -56,6 +59,11 @@ jobs:
           else
             echo "frontend=false" >> $GITHUB_OUTPUT
           fi
+          if git diff --name-only HEAD^ HEAD | grep -q '^nexus-orchestration/'; then
+            echo "worker=true" >> $GITHUB_OUTPUT
+          else
+            echo "worker=false" >> $GITHUB_OUTPUT
+          fi
 
   build-push:
     name: build ${{ matrix.service }}
@@ -64,7 +72,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [backend, frontend]
+        include:
+          - service: backend
+            context: backend
+          - service: frontend
+            context: frontend
+          # Worker (nexus-orchestration): build context is the package dir, but
+          # the ECS service / ECR repo / task-def family are all "worker".
+          - service: worker
+            context: nexus-orchestration
     steps:
       - name: skip if not changed
         id: gate
@@ -72,6 +88,7 @@ jobs:
           case "${{ matrix.service }}" in
             backend)  changed="${{ needs.detect.outputs.backend }}" ;;
             frontend) changed="${{ needs.detect.outputs.frontend }}" ;;
+            worker)   changed="${{ needs.detect.outputs.worker }}" ;;
           esac
           echo "changed=$changed" >> $GITHUB_OUTPUT
 
@@ -93,11 +110,29 @@ jobs:
         if: steps.gate.outputs.changed == 'true' && matrix.service == 'frontend'
         id: ssm
         run: |
-          get() { aws ssm get-parameter --name "$1" --query 'Parameter.Value' --output text; }
-          echo "pool_id=$(get /nexus-dev-edgm/cognito_user_pool_id)" >> $GITHUB_OUTPUT
-          echo "client_id=$(get /nexus-dev-edgm/cognito_client_id)" >> $GITHUB_OUTPUT
-          # App/API URL are derived from the ALB DNS; override via repo variable if you add a custom domain.
+          # -e: fail on any error (including SSM AccessDenied). Without this,
+          # a silent empty SSM read would bake NEXT_PUBLIC_*="" into the bundle
+          # and produce "Auth UserPool not configured" in the browser.
+          # -u: catch typos in var names. -o pipefail: surface errors in pipes.
+          set -euo pipefail
+
+          get() {
+            local name="$1"
+            local value
+            value=$(aws ssm get-parameter --name "$name" --query 'Parameter.Value' --output text)
+            if [ -z "$value" ] || [ "$value" = "None" ]; then
+              echo "::error::SSM parameter $name is empty or missing" >&2
+              exit 1
+            fi
+            echo "$value"
+          }
+
+          pool_id=$(get /nexus-dev-edgm/cognito_user_pool_id)
+          client_id=$(get /nexus-dev-edgm/cognito_client_id)
           ALB_URL="${APP_PUBLIC_URL:-http://nexus-dev-edgm-alb-1027640062.us-east-1.elb.amazonaws.com}"
+
+          echo "pool_id=$pool_id" >> $GITHUB_OUTPUT
+          echo "client_id=$client_id" >> $GITHUB_OUTPUT
           echo "app_url=$ALB_URL" >> $GITHUB_OUTPUT
 
       - name: docker build + push (backend)
@@ -105,9 +140,23 @@ jobs:
         env:
           IMAGE_TAG: ${{ github.sha }}
           REPO: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/nexus-dev-edgm-${{ matrix.service }}
-        working-directory: ${{ matrix.service }}
+        working-directory: ${{ matrix.context }}
         run: |
           docker build -t "$REPO:$IMAGE_TAG" .
+          docker push "$REPO:$IMAGE_TAG"
+
+      - name: docker build + push (worker, linux/amd64 single-arch)
+        if: steps.gate.outputs.changed == 'true' && matrix.service == 'worker'
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          REPO: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/nexus-dev-edgm-${{ matrix.service }}
+        working-directory: ${{ matrix.context }}
+        run: |
+          # --provenance=false prevents BuildKit from producing a manifest list,
+          # which ECR rejects on IMMUTABLE repos. --platform locks the arch to
+          # Fargate's runtime (linux/amd64).
+          docker build --platform linux/amd64 --provenance=false \
+            -t "$REPO:$IMAGE_TAG" .
           docker push "$REPO:$IMAGE_TAG"
 
       - name: docker build + push (frontend, with NEXT_PUBLIC_* build-args)
@@ -115,8 +164,19 @@ jobs:
         env:
           IMAGE_TAG: ${{ github.sha }}
           REPO: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/nexus-dev-edgm-${{ matrix.service }}
-        working-directory: ${{ matrix.service }}
+        working-directory: ${{ matrix.context }}
         run: |
+          set -euo pipefail
+
+          # Defensive: abort before docker build if any required NEXT_PUBLIC
+          # build-arg resolved to empty. These get baked into the client
+          # bundle at compile time — once the image is pushed the value is
+          # frozen, so we must fail the build loudly instead of producing
+          # a broken deployment.
+          : "${{ steps.ssm.outputs.pool_id   }}"
+          : "${{ steps.ssm.outputs.client_id }}"
+          : "${{ steps.ssm.outputs.app_url   }}"
+
           docker build \
             --build-arg NEXT_PUBLIC_AUTH_MODE=prod \
             --build-arg NEXT_PUBLIC_APP_URL="${{ steps.ssm.outputs.app_url }}" \

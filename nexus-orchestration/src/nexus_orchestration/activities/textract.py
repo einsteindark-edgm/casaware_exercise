@@ -1,7 +1,8 @@
 """Textract activities. Real mode uses boto3 AnalyzeExpense / AnalyzeDocument.
 
-When settings.fake_providers is True, returns deterministic synthetic results
-so the workflow can run against LocalStack S3 without an AWS Textract endpoint.
+When settings.use_fake_textract is True (FAKE_TEXTRACT env or FAKE_PROVIDERS
+fallback), returns deterministic synthetic results so the workflow can run
+against LocalStack S3 without an AWS Textract endpoint.
 """
 from __future__ import annotations
 
@@ -31,9 +32,9 @@ def _resolved_bucket(inp: dict[str, Any]) -> str:
 
 @activity.defn(name="textract_analyze_expense")
 async def textract_analyze_expense(inp: dict[str, Any]) -> dict[str, Any]:
-    log.info("textract.start", s3_key=inp["s3_key"], fake=settings.fake_providers)
+    log.info("textract.start", s3_key=inp["s3_key"], fake=settings.use_fake_textract)
 
-    if settings.fake_providers:
+    if settings.use_fake_textract:
         return fake_textract_extract(inp["s3_key"], _user_reported_from_input(inp))
 
     import boto3  # type: ignore[import-not-found]
@@ -71,7 +72,7 @@ async def textract_analyze_expense(inp: dict[str, Any]) -> dict[str, Any]:
 
 @activity.defn(name="textract_analyze_document_queries")
 async def textract_analyze_document_queries(inp: dict[str, Any]) -> dict[str, Any]:
-    if settings.fake_providers:
+    if settings.use_fake_textract:
         # Fall back to the same fake — if we got here, something wasn't great
         # about the first attempt; bump confidence slightly so the caller can
         # tell the queries branch ran.
