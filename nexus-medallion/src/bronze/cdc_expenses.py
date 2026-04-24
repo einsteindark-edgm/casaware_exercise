@@ -67,7 +67,7 @@ def mongodb_cdc_expenses():
         spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", spark.conf.get("nexus.msk_bootstrap"))
         .option("subscribe", "nexus.nexus_dev.expenses")
-        .option("startingOffsets", "earliest")
+        .option("startingOffsets", "latest")
         .option("failOnDataLoss", "false")
         .option("kafka.security.protocol", "SASL_SSL")
         .option("kafka.sasl.mechanism", "AWS_MSK_IAM")
