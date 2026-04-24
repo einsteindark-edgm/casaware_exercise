@@ -18,7 +18,7 @@
 variable "debezium_image" {
   description = "Imagen Docker de Debezium Server con aws-msk-iam-auth jar añadido. Buildeada desde debezium-image/Dockerfile."
   type        = string
-  default     = "525237381234.dkr.ecr.us-east-1.amazonaws.com/nexus-dev-edgm-debezium:3.0.0-msk-iam-v1"
+  default     = "525237381234.dkr.ecr.us-east-1.amazonaws.com/nexus-dev-edgm-debezium:3.0.0-msk-iam-v5"
 }
 
 variable "debezium_desired_count" {
@@ -141,6 +141,11 @@ resource "aws_ecs_task_definition" "debezium" {
       { name = "DEBEZIUM_TRANSFORMS_UNWRAP_TYPE", value = "io.debezium.connector.mongodb.transforms.ExtractNewDocumentState" },
       { name = "DEBEZIUM_TRANSFORMS_UNWRAP_ADD_FIELDS", value = "op,source.ts_ms" },
       { name = "DEBEZIUM_TRANSFORMS_UNWRAP_DELETE_TOMBSTONE_HANDLING_MODE", value = "rewrite" },
+      # Mongo arrays con valores de tipos mixtos (p.ej. expense_events.details,
+      # hitl_tasks.resolved_fields) hacen fallar al MongoDataConverter con
+      # "not the same type for all documents". 'document' los serializa como
+      # struct de índices 0..n permitiendo tipos heterogéneos.
+      { name = "DEBEZIUM_TRANSFORMS_UNWRAP_ARRAY_ENCODING", value = "document" },
 
       # ── Sink: Kafka / MSK IAM ──────────────────────────────────────
       { name = "DEBEZIUM_SINK_TYPE", value = "kafka" },
