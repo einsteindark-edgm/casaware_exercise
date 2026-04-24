@@ -35,7 +35,7 @@ targets:
     variables:
       catalog: "nexus_dev"
       mongodb_db: "nexus_dev"
-      msk_bootstrap_servers: "boot-lddwjvb7.c2.kafka-serverless.us-east-1.amazonaws.com:9098"
+      msk_bootstrap_servers: "b-1.nexusdevedgmkafkaprov.ygf4z6.c23.kafka.us-east-1.amazonaws.com:9098,b-2.nexusdevedgmkafkaprov.ygf4z6.c23.kafka.us-east-1.amazonaws.com:9098"
       msk_service_credential: "nexus-dev-edgm-msk-cred"
 
   prod:

@@ -94,11 +94,12 @@ resource "aws_lb_listener" "msk_broker" {
 # source no matchee), TF crea igual los recursos sin attachments — el
 # user corre un segundo apply rellenando var.msk_broker_ips.
 resource "aws_lb_target_group_attachment" "msk_broker" {
-  count             = local.msk_privatelink_active && length(local.msk_broker_ips_effective) >= length(aws_subnet.private) ? length(aws_subnet.private) : 0
-  target_group_arn  = aws_lb_target_group.msk_broker[count.index].arn
-  target_id         = local.msk_broker_ips_effective[count.index]
-  port              = 9098
-  availability_zone = "all"
+  count            = local.msk_privatelink_active && length(local.msk_broker_ips_effective) >= length(aws_subnet.private) ? length(aws_subnet.private) : 0
+  target_group_arn = aws_lb_target_group.msk_broker[count.index].arn
+  target_id        = local.msk_broker_ips_effective[count.index]
+  port             = 9098
+  # availability_zone solo se setea cuando el target es fuera del VPC.
+  # Para IPs intra-VPC, AWS deduce la AZ del IP y rechaza override.
 }
 
 # ── VPC Endpoint Service por NLB ─────────────────────────────────────
@@ -111,7 +112,11 @@ resource "aws_vpc_endpoint_service" "msk_broker" {
   count                      = local.msk_privatelink_active ? length(aws_subnet.private) : 0
   acceptance_required        = false
   network_load_balancer_arns = [aws_lb.msk_broker[count.index].arn]
-  allowed_principals         = [var.databricks_serverless_principal_arn]
+  # Wildcard temporal para bootstrap del NCC en 2026 — Databricks Serverless
+  # rotó el account ID esporadicamente entre 2024-2026. Identificar el
+  # principal real via `aws ec2 describe-vpc-endpoint-connections` después
+  # de que Databricks NCC cree el endpoint, y restringir a ese ARN específico.
+  allowed_principals = ["*"]
 
   tags = { Name = "${var.prefix}-msk-vpces-${count.index}" }
 }

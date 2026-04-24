@@ -26,4 +26,8 @@ provider "databricks" {
   account_id    = var.databricks_account_id
   client_id     = var.databricks_client_id
   client_secret = var.databricks_client_secret
+  # Provider 1.x: cuando hay múltiples providers, no heredar auth
+  # default. Forzar oauth-m2m (client_id+client_secret) para evitar
+  # "default auth: cannot configure default credentials".
+  auth_type = "oauth-m2m"
 }
