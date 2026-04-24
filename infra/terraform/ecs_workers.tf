@@ -49,9 +49,9 @@ resource "aws_ecs_task_definition" "worker" {
       { name = "FAKE_PROVIDERS", value = "true" },
       { name = "FAKE_HITL_MODE", value = "force" },
       # Per-provider overrides. Flip a "false" conforme cada uno este listo.
-      { name = "FAKE_TEXTRACT", value = "false" },       # real (Phase D)
-      { name = "FAKE_BEDROCK", value = "true" },         # pendiente credenciales
-      { name = "FAKE_VECTOR_SEARCH", value = "true" },   # pendiente C.7 index poblado
+      { name = "FAKE_TEXTRACT", value = "false" },     # real (Phase D)
+      { name = "FAKE_BEDROCK", value = "true" },       # pendiente credenciales
+      { name = "FAKE_VECTOR_SEARCH", value = "true" }, # pendiente C.7 index poblado
       { name = "AUDIT_SOURCE", value = "mongo" },
       { name = "LOG_LEVEL", value = "INFO" },
       { name = "WORKER_MAX_CONCURRENT_ACTIVITIES", value = "20" },
