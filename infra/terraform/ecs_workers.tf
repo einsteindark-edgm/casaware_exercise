@@ -98,6 +98,11 @@ resource "aws_ecs_service" "worker" {
   }
 
   lifecycle {
-    ignore_changes = [desired_count]
+    # task_definition is managed out-of-band by .github/workflows/build-and-push.yml
+    # (each push to main registers a new revision pointing at the new image tag).
+    # Without ignoring it, `terraform apply` reverts the service to the TF-tracked
+    # revision and resurrects the previous image — which is how the _parse_amount
+    # fix in comparison.py got rolled back to v20260423-2236.
+    ignore_changes = [desired_count, task_definition]
   }
 }
