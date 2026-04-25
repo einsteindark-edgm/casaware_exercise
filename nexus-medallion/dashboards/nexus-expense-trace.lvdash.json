@@ -726,7 +726,13 @@
                       "expression": "`rows`"
                     }
                   ],
-                  "disaggregated": true
+                  "disaggregated": true,
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ]
                 }
               }
             ],
@@ -832,7 +838,13 @@
                       "expression": "`workflow_id`"
                     }
                   ],
-                  "disaggregated": true
+                  "disaggregated": true,
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ]
                 }
               }
             ],
@@ -1208,7 +1220,7 @@
                 ]
               },
               "frame": {
-                "title": "Silver \u2014 current state",
+                "title": "Silver — current state",
                 "showTitle": true
               }
             }
@@ -1266,7 +1278,13 @@
                       "expression": "`extracted_at`"
                     }
                   ],
-                  "disaggregated": true
+                  "disaggregated": true,
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ]
                 }
               }
             ],
@@ -1584,7 +1602,13 @@
                       "expression": "`workflow_id`"
                     }
                   ],
-                  "disaggregated": true
+                  "disaggregated": true,
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ]
                 }
               }
             ],
@@ -1835,7 +1859,13 @@
                       "expression": "`event_id`"
                     }
                   ],
-                  "disaggregated": true
+                  "disaggregated": true,
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ]
                 }
               }
             ],
@@ -2043,7 +2073,13 @@
                       "expression": "`approved_at`"
                     }
                   ],
-                  "disaggregated": true
+                  "disaggregated": true,
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ]
                 }
               }
             ],
@@ -2280,7 +2316,7 @@
                 ]
               },
               "frame": {
-                "title": "Gold \u2014 expense_audit",
+                "title": "Gold — expense_audit",
                 "showTitle": true
               }
             }
@@ -2334,7 +2370,13 @@
                       "expression": "`_cdc_ingestion_ts`"
                     }
                   ],
-                  "disaggregated": true
+                  "disaggregated": true,
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ]
                 }
               }
             ],
@@ -2614,7 +2656,13 @@
                       "expression": "`uploaded_at`"
                     }
                   ],
-                  "disaggregated": true
+                  "disaggregated": true,
+                  "parameters": [
+                    {
+                      "name": "p_expense_id",
+                      "keyword": "p_expense_id"
+                    }
+                  ]
                 }
               }
             ],
