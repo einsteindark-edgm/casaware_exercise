@@ -314,6 +314,19 @@
               "frame": {
                 "title": "Select an expense_id",
                 "showTitle": true
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "p_expense_id",
+                    "queryName": "param_q_d_presence"
+                  },
+                  {
+                    "fieldName": "expense_id",
+                    "displayName": "expense_id",
+                    "queryName": "options_q_d_all_ids"
+                  }
+                ]
               }
             },
             "selection": {
