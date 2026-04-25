@@ -15,15 +15,10 @@
       ],
       "parameters": [
         {
-          "displayName": "expense_id",
+          "name": "p_expense_id",
           "keyword": "p_expense_id",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": []
-            }
-          }
+          "displayName": "expense_id",
+          "dataType": "STRING"
         }
       ]
     },
@@ -39,15 +34,10 @@
       ],
       "parameters": [
         {
-          "displayName": "expense_id",
+          "name": "p_expense_id",
           "keyword": "p_expense_id",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": []
-            }
-          }
+          "displayName": "expense_id",
+          "dataType": "STRING"
         }
       ]
     },
@@ -64,15 +54,10 @@
       ],
       "parameters": [
         {
-          "displayName": "expense_id",
+          "name": "p_expense_id",
           "keyword": "p_expense_id",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": []
-            }
-          }
+          "displayName": "expense_id",
+          "dataType": "STRING"
         }
       ]
     },
@@ -90,15 +75,10 @@
       ],
       "parameters": [
         {
-          "displayName": "expense_id",
+          "name": "p_expense_id",
           "keyword": "p_expense_id",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": []
-            }
-          }
+          "displayName": "expense_id",
+          "dataType": "STRING"
         }
       ]
     },
@@ -113,15 +93,10 @@
       ],
       "parameters": [
         {
-          "displayName": "expense_id",
+          "name": "p_expense_id",
           "keyword": "p_expense_id",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": []
-            }
-          }
+          "displayName": "expense_id",
+          "dataType": "STRING"
         }
       ]
     },
@@ -136,15 +111,10 @@
       ],
       "parameters": [
         {
-          "displayName": "expense_id",
+          "name": "p_expense_id",
           "keyword": "p_expense_id",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": []
-            }
-          }
+          "displayName": "expense_id",
+          "dataType": "STRING"
         }
       ]
     },
@@ -160,15 +130,10 @@
       ],
       "parameters": [
         {
-          "displayName": "expense_id",
+          "name": "p_expense_id",
           "keyword": "p_expense_id",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": []
-            }
-          }
+          "displayName": "expense_id",
+          "dataType": "STRING"
         }
       ]
     },
@@ -183,15 +148,10 @@
       ],
       "parameters": [
         {
-          "displayName": "expense_id",
+          "name": "p_expense_id",
           "keyword": "p_expense_id",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": []
-            }
-          }
+          "displayName": "expense_id",
+          "dataType": "STRING"
         }
       ]
     },
@@ -351,30 +311,17 @@
             "spec": {
               "version": 2,
               "widgetType": "filter-single-select",
-              "encodings": {
-                "fields": [
-                  {
-                    "parameterName": "p_expense_id",
-                    "queryName": "param_q_d_presence"
-                  },
-                  {
-                    "fieldName": "expense_id",
-                    "displayName": "expense_id",
-                    "queryName": "options_q_d_all_ids"
-                  }
-                ]
-              },
-              "selection": {
-                "defaultSelection": {
-                  "values": {
-                    "dataType": "STRING",
-                    "values": []
-                  }
-                }
-              },
               "frame": {
                 "title": "Select an expense_id",
                 "showTitle": true
+              }
+            },
+            "selection": {
+              "defaultSelection": {
+                "values": {
+                  "dataType": "STRING",
+                  "values": []
+                }
               }
             }
           },
@@ -1144,7 +1091,7 @@
                 ]
               },
               "frame": {
-                "title": "Silver \u2014 current state",
+                "title": "Silver — current state",
                 "showTitle": true
               }
             }
@@ -2216,7 +2163,7 @@
                 ]
               },
               "frame": {
-                "title": "Gold \u2014 expense_audit",
+                "title": "Gold — expense_audit",
                 "showTitle": true
               }
             }
