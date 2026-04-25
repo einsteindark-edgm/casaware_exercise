@@ -16,8 +16,17 @@ from __future__ import annotations
 
 import asyncio
 
-from temporalio.client import Client, TLSConfig
-from temporalio.worker import Worker
+# Widen the ECS container-metadata fetcher timeouts BEFORE any boto3 client
+# is constructed (textract.py / llm.py do `import boto3` lazily inside
+# activities). The class attributes below are hardcoded in botocore
+# (TIMEOUT_SECONDS=2, RETRY_ATTEMPTS=3); no env var overrides them.
+import botocore.utils as _botocore_utils
+
+_botocore_utils.ContainerMetadataFetcher.TIMEOUT_SECONDS = 10
+_botocore_utils.ContainerMetadataFetcher.RETRY_ATTEMPTS = 5
+
+from temporalio.client import Client, TLSConfig  # noqa: E402
+from temporalio.worker import Worker  # noqa: E402
 
 from nexus_orchestration.activities.comparison import compare_fields
 from nexus_orchestration.activities.llm import bedrock_converse, load_rag_system_prompt

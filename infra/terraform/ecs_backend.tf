@@ -20,8 +20,10 @@ resource "aws_ecs_task_definition" "backend" {
   family                   = "${var.prefix}-backend"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "256"
-  memory                   = "512"
+  # 256/512 was undersized — libmagic sniff + S3 upload starved the event loop
+  # and the ECS metadata fetch missed its deadline → CredentialRetrievalError.
+  cpu                      = "512"
+  memory                   = "1024"
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
   task_role_arn            = aws_iam_role.backend_task.arn
 
@@ -38,11 +40,6 @@ resource "aws_ecs_task_definition" "backend" {
     environment = [
       { name = "ENV", value = "dev" },
       { name = "AWS_REGION", value = var.aws_region },
-      # Stretch the ECS task-role credential fetch timeouts. The default
-      # (~1s, 1 attempt) was timing out under cold-start contention →
-      # CredentialRetrievalError on the first /expenses POST.
-      { name = "AWS_METADATA_SERVICE_TIMEOUT", value = "10" },
-      { name = "AWS_METADATA_SERVICE_NUM_ATTEMPTS", value = "5" },
       { name = "AUTH_MODE", value = "prod" },
       { name = "TEMPORAL_MODE", value = "real" },
       { name = "TEMPORAL_NAMESPACE", value = "default" },

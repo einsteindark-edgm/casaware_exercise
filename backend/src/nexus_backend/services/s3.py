@@ -3,20 +3,32 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
-import aioboto3
-from botocore.config import Config
+# IMPORTANT: monkey-patch the ECS container-metadata fetcher BEFORE creating
+# any aioboto3/botocore session. The class attributes below are hardcoded
+# in botocore (TIMEOUT_SECONDS=2, RETRY_ATTEMPTS=3) — there is no env var
+# or Config option that can override them. On Fargate cold starts the
+# 169.254.170.2 endpoint can take >2s to respond, which surfaces as
+# CredentialRetrievalError on the first user request. AWS_METADATA_SERVICE_*
+# env vars only apply to EC2 IMDS, NOT to ECS task-role fetch.
+import aiobotocore.utils as _aiobotocore_utils
+import botocore.utils as _botocore_utils
 
-from nexus_backend.config import settings
-from nexus_backend.observability.logging import get_logger
+_botocore_utils.ContainerMetadataFetcher.TIMEOUT_SECONDS = 10
+_botocore_utils.ContainerMetadataFetcher.RETRY_ATTEMPTS = 5
+_aiobotocore_utils.AioContainerMetadataFetcher.TIMEOUT_SECONDS = 10
+_aiobotocore_utils.AioContainerMetadataFetcher.RETRY_ATTEMPTS = 5
+
+import aioboto3  # noqa: E402
+from botocore.config import Config  # noqa: E402
+
+from nexus_backend.config import settings  # noqa: E402
+from nexus_backend.observability.logging import get_logger  # noqa: E402
 
 log = get_logger(__name__)
 
 
-# ECS task-role credential fetch + S3 calls share these timeouts. The default
-# botocore connect/read timeouts (~1s) and 4 retry attempts were causing
-# CredentialRetrievalError on cold tasks under load (the metadata endpoint
-# 169.254.170.2 sometimes takes >1s to answer the first call). Adaptive
-# retries back off when ECS metadata is slow.
+# Botocore Config governs the *S3 API call* timeouts/retries (separate from
+# credential fetch). Adaptive retries back off on throttling.
 _CLIENT_CONFIG = Config(
     connect_timeout=5,
     read_timeout=30,

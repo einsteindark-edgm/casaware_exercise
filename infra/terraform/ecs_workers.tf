@@ -37,10 +37,6 @@ resource "aws_ecs_task_definition" "worker" {
     environment = [
       { name = "ENV", value = "dev" },
       { name = "AWS_REGION", value = var.aws_region },
-      # Stretch the ECS task-role credential fetch timeouts (Bedrock/S3/
-      # Textract activities all share the same provider chain).
-      { name = "AWS_METADATA_SERVICE_TIMEOUT", value = "10" },
-      { name = "AWS_METADATA_SERVICE_NUM_ATTEMPTS", value = "5" },
       { name = "TEMPORAL_NAMESPACE", value = "default" },
       # `all` = una task atiende las 4 queues. Ajustar si se split en 4.
       { name = "TASK_QUEUE", value = "all" },
