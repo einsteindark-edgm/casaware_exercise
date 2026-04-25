@@ -376,7 +376,7 @@
                       "expression": "COUNT_IF(`associative_filter_predicate_group`)"
                     }
                   ],
-                  "disaggregated": false
+                  "disaggregated": true
                 }
               }
             ],
@@ -390,34 +390,6 @@
                     "queryName": "param_q_d_presence"
                   },
                   {
-                    "parameterName": "p_expense_id",
-                    "queryName": "param_q_d_bronze_cdc_expense"
-                  },
-                  {
-                    "parameterName": "p_expense_id",
-                    "queryName": "param_q_d_silver_expense"
-                  },
-                  {
-                    "parameterName": "p_expense_id",
-                    "queryName": "param_q_d_silver_ocr"
-                  },
-                  {
-                    "parameterName": "p_expense_id",
-                    "queryName": "param_q_d_silver_timeline"
-                  },
-                  {
-                    "parameterName": "p_expense_id",
-                    "queryName": "param_q_d_silver_hitl"
-                  },
-                  {
-                    "parameterName": "p_expense_id",
-                    "queryName": "param_q_d_gold_audit"
-                  },
-                  {
-                    "parameterName": "p_expense_id",
-                    "queryName": "param_q_d_bronze_receipt"
-                  },
-                  {
                     "fieldName": "expense_id",
                     "displayName": "expense_id",
                     "queryName": "options_q_d_all_ids"
@@ -428,11 +400,7 @@
                 "defaultSelection": {
                   "values": {
                     "dataType": "STRING",
-                    "values": [
-                      {
-                        "value": ""
-                      }
-                    ]
+                    "values": []
                   }
                 }
               },
@@ -454,7 +422,7 @@
             "name": "w_recent",
             "queries": [
               {
-                "name": "main_query",
+                "name": "main_query_w_recent",
                 "query": {
                   "datasetName": "d_recent",
                   "fields": [
@@ -713,7 +681,7 @@
             "name": "w_presence",
             "queries": [
               {
-                "name": "main_query",
+                "name": "main_query_w_presence",
                 "query": {
                   "datasetName": "d_presence",
                   "fields": [
@@ -775,7 +743,7 @@
             "name": "w_silver_expense",
             "queries": [
               {
-                "name": "main_query",
+                "name": "main_query_w_silver_expense",
                 "query": {
                   "datasetName": "d_silver_expense",
                   "fields": [
@@ -1208,7 +1176,7 @@
                 ]
               },
               "frame": {
-                "title": "Silver \u2014 current state",
+                "title": "Silver — current state",
                 "showTitle": true
               }
             }
@@ -1225,7 +1193,7 @@
             "name": "w_silver_ocr",
             "queries": [
               {
-                "name": "main_query",
+                "name": "main_query_w_silver_ocr",
                 "query": {
                   "datasetName": "d_silver_ocr",
                   "fields": [
@@ -1551,7 +1519,7 @@
             "name": "w_silver_hitl",
             "queries": [
               {
-                "name": "main_query",
+                "name": "main_query_w_silver_hitl",
                 "query": {
                   "datasetName": "d_silver_hitl",
                   "fields": [
@@ -1810,7 +1778,7 @@
             "name": "w_silver_timeline",
             "queries": [
               {
-                "name": "main_query",
+                "name": "main_query_w_silver_timeline",
                 "query": {
                   "datasetName": "d_silver_timeline",
                   "fields": [
@@ -2006,7 +1974,7 @@
             "name": "w_gold",
             "queries": [
               {
-                "name": "main_query",
+                "name": "main_query_w_gold",
                 "query": {
                   "datasetName": "d_gold_audit",
                   "fields": [
@@ -2280,7 +2248,7 @@
                 ]
               },
               "frame": {
-                "title": "Gold \u2014 expense_audit",
+                "title": "Gold — expense_audit",
                 "showTitle": true
               }
             }
@@ -2297,7 +2265,7 @@
             "name": "w_bronze_cdc",
             "queries": [
               {
-                "name": "main_query",
+                "name": "main_query_w_bronze_cdc",
                 "query": {
                   "datasetName": "d_bronze_cdc_expense",
                   "fields": [
@@ -2589,7 +2557,7 @@
             "name": "w_bronze_receipt",
             "queries": [
               {
-                "name": "main_query",
+                "name": "main_query_w_bronze_receipt",
                 "query": {
                   "datasetName": "d_bronze_receipt",
                   "fields": [
