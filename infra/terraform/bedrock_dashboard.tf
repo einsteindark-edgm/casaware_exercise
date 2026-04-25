@@ -1,12 +1,12 @@
 # ── Phase E.6 — CloudWatch Dashboard "Nexus Agent (Bedrock)" ─────────
 #
-# Vista enfocada en el agente: qué decide el modelo (tool_use), cuántos
-# turnos toma, cuántos tokens consume, qué tools fallan. Combina:
-#  - Bedrock Invocation Logs (prompts + respuestas completas)
-#  - Log puente del worker (`bedrock.invoke` con trace_id)
-#  - Métricas AWS/Bedrock (latencia, tokens, errores)
+# Agent-focused view: what the model decides (tool_use), how many turns
+# it takes, how many tokens it consumes, which tools fail. Combines:
+#  - Bedrock Invocation Logs (full prompts + responses)
+#  - Worker bridge log (`bedrock.invoke` with trace_id)
+#  - AWS/Bedrock metrics (latency, tokens, errors)
 #
-# Llave de unión con el dashboard breadcrumb: trace_id (input variable).
+# Join key with the breadcrumb dashboard: trace_id (input variable).
 
 resource "aws_cloudwatch_dashboard" "agent" {
   dashboard_name = "${var.prefix}-agent-bedrock"
@@ -33,109 +33,124 @@ resource "aws_cloudwatch_dashboard" "agent" {
         width  = 24
         height = 3
         properties = {
-          markdown = "# Nexus Agent (Bedrock)\n\nQué decide el modelo en cada turno: tools que invoca, tokens consumidos, latencia, errores. Para ver la cadena completa de servicios de una petición ir al dashboard [Nexus Breadcrumb](https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${var.prefix}-breadcrumb-live).\n\n**Cómo usar**: pegá un `trace_id` arriba para ver QUÉ decidió el modelo en esa petición específica. El widget _Prompts y respuestas_ accede a Bedrock Invocation Logs (texto completo)."
+          markdown = "# Nexus Agent (Bedrock)\n\nWhat the model decides on each turn: tools it invokes, tokens consumed, latency, errors. To see the full service chain of a request go to the [Nexus Breadcrumb dashboard](https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${var.prefix}-breadcrumb-live).\n\n**How to use**: pick a `trace_id` from the _Recent agent invocations_ table below and paste it in the input at the top — every widget filters automatically. The _Prompts and responses_ widget pulls the full text from Bedrock Invocation Logs."
         }
       },
 
-      # ── Row 1: decisiones agregadas (sin filtro) ────────────────
+      # ── Row 1: catalog of recent agent invocations (THE PICKER) ──
       {
         type   = "log"
         x      = 0
         y      = 3
+        width  = 24
+        height = 8
+        properties = {
+          title  = "🗂️ Recent agent invocations — copy a trace_id from here (last hour)"
+          region = var.aws_region
+          query  = "SOURCE '${aws_cloudwatch_log_group.worker.name}' | fields @timestamp, trace_id, workflow_id, model_id, mode, stop_reason, tools_emitted_count, input_tokens, output_tokens, latency_ms | filter event = \"bedrock.invoke\" | sort @timestamp desc | limit 50"
+          view   = "table"
+        }
+      },
+
+      # ── Row 2: aggregated decisions (no filter) ─────────────────
+      {
+        type   = "log"
+        x      = 0
+        y      = 11
         width  = 12
         height = 8
         properties = {
-          title  = "🎯 Tools que el modelo decidió usar (última hora)"
+          title  = "🎯 Tools the model chose to invoke (last hour)"
           region = var.aws_region
-          query  = "SOURCE '${aws_cloudwatch_log_group.worker.name}' | fields @timestamp | filter event = \"bedrock.invoke\" and tools_emitted_count > 0 | parse tools_emitted /\"name\":\"(?<tool_name>[^\"]+)\"/ | stats count() as veces by tool_name | sort veces desc"
+          query  = "SOURCE '${aws_cloudwatch_log_group.worker.name}' | fields @timestamp | filter event = \"bedrock.invoke\" and tools_emitted_count > 0 | parse tools_emitted /\"name\":\"(?<tool_name>[^\"]+)\"/ | stats count() as times by tool_name | sort times desc"
           view   = "pie"
         }
       },
       {
         type   = "log"
         x      = 12
-        y      = 3
+        y      = 11
         width  = 12
         height = 8
         properties = {
           title  = "Stop reasons (end_turn / tool_use / max_tokens / error)"
           region = var.aws_region
-          query  = "SOURCE '${aws_cloudwatch_log_group.worker.name}' | filter event = \"bedrock.invoke\" | stats count() as veces by stop_reason | sort veces desc"
+          query  = "SOURCE '${aws_cloudwatch_log_group.worker.name}' | filter event = \"bedrock.invoke\" | stats count() as times by stop_reason | sort times desc"
           view   = "bar"
         }
       },
 
-      # ── Row 2: por trace_id (decisión a decisión) ───────────────
+      # ── Row 3: per trace_id (decision by decision) ──────────────
       {
         type   = "log"
         x      = 0
-        y      = 11
+        y      = 19
         width  = 24
         height = 10
         properties = {
-          title  = "🧠 Decisiones del modelo en este trace_id (cronología de invocaciones)"
+          title  = "🧠 Model decisions for the selected trace_id (turn-by-turn timeline)"
           region = var.aws_region
           query  = "SOURCE '${aws_cloudwatch_log_group.worker.name}' | fields @timestamp, model_id, mode, stop_reason, tools_offered, tools_emitted, tools_emitted_count, input_tokens, output_tokens, text_chars, latency_ms, workflow_id | filter event = \"bedrock.invoke\" and trace_id = \"PASTE-TRACE-ID-HERE\" | sort @timestamp asc | limit 50"
           view   = "table"
         }
       },
 
-      # ── Row 3: prompt + respuesta completa (Bedrock Invocation Logs) ──
+      # ── Row 4: full prompt + response (Bedrock Invocation Logs) ─
       {
         type   = "log"
         x      = 0
-        y      = 21
+        y      = 29
         width  = 24
         height = 14
         properties = {
-          title  = "📜 Prompts y respuestas del modelo (Bedrock Invocation Logs — filtrado por timestamp del trace)"
+          title  = "📜 Full prompts and model responses (Bedrock Invocation Logs — narrow the time range to your trace's window)"
           region = var.aws_region
-          # Bedrock logs no traen trace_id directamente — los filtramos por
-          # ventana cercana al log puente. El usuario ajusta el time range
-          # del dashboard al rango del trace y este widget muestra todo lo
-          # de Bedrock en esa ventana.
+          # Bedrock logs don't carry trace_id directly. Workaround: align
+          # the dashboard's time range to the window of the selected trace
+          # (use the bridge log timestamps in the row above) and this widget
+          # surfaces every invocation in that window.
           query = "SOURCE '${aws_cloudwatch_log_group.bedrock_invocations.name}' | fields @timestamp, modelId, operation, input.inputContentType, output.outputContentType, input.inputBodyJson.messages, output.outputBodyJson.output.message.content, output.outputBodyJson.stopReason, output.outputBodyJson.usage.inputTokens, output.outputBodyJson.usage.outputTokens | sort @timestamp desc | limit 20"
           view  = "table"
         }
       },
 
-      # ── Row 4: turnos por workflow (agentic loop iterations) ────
+      # ── Row 5: turns per workflow + tool input shapes ──────────
       {
         type   = "log"
         x      = 0
-        y      = 35
+        y      = 43
         width  = 12
         height = 8
         properties = {
-          title  = "🔁 Iteraciones del agentic loop por workflow (turnos antes de respuesta final)"
+          title  = "🔁 Agentic loop iterations per workflow (turns until final answer)"
           region = var.aws_region
-          query  = "SOURCE '${aws_cloudwatch_log_group.worker.name}' | filter event = \"bedrock.invoke\" | stats count() as turnos by workflow_id | sort turnos desc | limit 20"
+          query  = "SOURCE '${aws_cloudwatch_log_group.worker.name}' | filter event = \"bedrock.invoke\" | stats count() as turns by workflow_id | sort turns desc | limit 20"
           view   = "table"
         }
       },
       {
         type   = "log"
         x      = 12
-        y      = 35
+        y      = 43
         width  = 12
         height = 8
         properties = {
-          title  = "💬 Tools input_keys más comunes (cómo llama el modelo a cada tool)"
+          title  = "💬 Most common tool input keys (how the model calls each tool)"
           region = var.aws_region
-          query  = "SOURCE '${aws_cloudwatch_log_group.worker.name}' | fields @timestamp | filter event = \"bedrock.invoke\" and tools_emitted_count > 0 | parse tools_emitted /\"name\":\"(?<tool>[^\"]+)\",\"input_keys\":\\[(?<keys>[^\\]]*)\\]/ | stats count() as veces by tool, keys | sort veces desc | limit 20"
+          query  = "SOURCE '${aws_cloudwatch_log_group.worker.name}' | fields @timestamp | filter event = \"bedrock.invoke\" and tools_emitted_count > 0 | parse tools_emitted /\"name\":\"(?<tool>[^\"]+)\",\"input_keys\":\\[(?<keys>[^\\]]*)\\]/ | stats count() as times by tool, keys | sort times desc | limit 20"
           view   = "table"
         }
       },
 
-      # ── Row 5: métricas Bedrock (todas las invocaciones) ────────
+      # ── Row 6: Bedrock metrics (all invocations) ────────────────
       {
         type   = "metric"
         x      = 0
-        y      = 43
+        y      = 51
         width  = 8
         height = 6
         properties = {
-          title   = "Latencia de invocación (P50/P95/P99)"
+          title   = "Invocation latency (P50 / P95 / P99)"
           region  = var.aws_region
           view    = "timeSeries"
           stacked = false
@@ -149,7 +164,7 @@ resource "aws_cloudwatch_dashboard" "agent" {
       {
         type   = "metric"
         x      = 8
-        y      = 43
+        y      = 51
         width  = 8
         height = 6
         properties = {
@@ -166,11 +181,11 @@ resource "aws_cloudwatch_dashboard" "agent" {
       {
         type   = "metric"
         x      = 16
-        y      = 43
+        y      = 51
         width  = 8
         height = 6
         properties = {
-          title   = "Errores y throttles"
+          title   = "Errors and throttles"
           region  = var.aws_region
           view    = "timeSeries"
           stacked = false
@@ -182,15 +197,15 @@ resource "aws_cloudwatch_dashboard" "agent" {
         }
       },
 
-      # ── Row 6: costo estimado (Nova Pro pricing — abril 2026) ───
+      # ── Row 7: estimated cost (Nova Pro pricing — Apr 2026) ─────
       {
         type   = "metric"
         x      = 0
-        y      = 49
+        y      = 57
         width  = 24
         height = 6
         properties = {
-          title   = "💰 Costo estimado por hora ($USD — Nova Pro: $0.0008/1k input, $0.0032/1k output)"
+          title   = "💰 Estimated cost per hour (USD — Nova Pro: $0.0008/1k input, $0.0032/1k output)"
           region  = var.aws_region
           view    = "timeSeries"
           stacked = true
@@ -208,6 +223,6 @@ resource "aws_cloudwatch_dashboard" "agent" {
 }
 
 output "agent_dashboard_url" {
-  description = "URL del dashboard CloudWatch del agente Bedrock."
+  description = "URL of the Bedrock agent CloudWatch dashboard."
   value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.agent.dashboard_name}"
 }
