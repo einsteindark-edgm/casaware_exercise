@@ -21,11 +21,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -49,11 +45,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -78,11 +70,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -108,11 +96,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -135,11 +119,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -162,11 +142,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -190,11 +166,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -217,11 +189,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -428,11 +396,7 @@
                 "defaultSelection": {
                   "values": {
                     "dataType": "STRING",
-                    "values": [
-                      {
-                        "value": ""
-                      }
-                    ]
+                    "values": []
                   }
                 }
               },
