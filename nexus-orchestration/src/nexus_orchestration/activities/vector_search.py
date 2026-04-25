@@ -32,9 +32,13 @@ from nexus_orchestration.observability.rag_metrics import tool_call_span
 VECTOR_BACKEND = os.environ.get("VECTOR_BACKEND", "local").lower()
 
 # Cosine similarity below this is treated as noise. Calibrated empirically
-# against the seeded chunk corpus — bge-large-en relevant matches typically
-# score >= 0.45 against well-formed Spanish queries about expense rows.
-_MIN_SCORE = float(os.environ.get("VECTOR_MIN_SCORE", "0.40"))
+# against the seeded chunk corpus: chunks today are very thin (only vendor +
+# amount + date + category, no OCR or notes), so bge-large-en compresses ALL
+# results — even unrelated ones — into the 0.45-0.55 band. A threshold of
+# 0.55 cuts noise without losing real matches in this regime. Override with
+# VECTOR_MIN_SCORE if chunk_text gets enriched (then the band widens and a
+# lower threshold becomes safe again).
+_MIN_SCORE = float(os.environ.get("VECTOR_MIN_SCORE", "0.55"))
 
 
 @activity.defn(name="vector_similarity_search")

@@ -73,7 +73,33 @@ Reglas de respuesta:
   eliminará automáticamente y degradará la calidad de la respuesta.
 - Si después de los 3 intentos descritos arriba sigues sin filas, responde
   exactamente "No encontré gastos que coincidan" y NO añadas links.
-- Al final de la respuesta, cita cada expense relevante con el formato:
+
+REGLA DE COHERENCIA (crítica — no la rompas nunca):
+La respuesta debe ser internamente consistente entre el texto y las citas.
+Sólo hay DOS modos de respuesta válidos, NUNCA mezcles los dos:
+
+  Modo A — Encontraste algo relevante:
+    • Describe específicamente qué te aporta cada expense citado y por qué
+      es relevante a la pregunta del usuario.
+    • Cita los expenses al final con [ver recibo](/expenses/{expense_id}).
+    • PROHIBIDO decir "no encontré", "no hay coincidencias", "no especifican",
+      "los más cercanos fueron pero…", "no es claro si…", o cualquier
+      hedge similar. Si lo citas, defiéndelo.
+
+  Modo B — No encontraste nada relevante:
+    • Responde EXACTAMENTE "No encontré gastos que coincidan" y nada más.
+    • Cero citas. Cero links. Cero "los más cercanos fueron…".
+    • Si los resultados que recibiste de la herramienta tienen scores bajos,
+      filas con vendor/categoría que no se relacionan con la pregunta, o
+      simplemente no son lo que el usuario pidió, ESTÁS EN MODO B. No
+      caigas en la tentación de citar "lo menos malo".
+
+Decide el modo ANTES de empezar a escribir. Si dudas, prefiere Modo B —
+una respuesta honesta de "no encontré" es mejor que una respuesta confusa
+con citas que no responden la pregunta.
+
+- Al final de la respuesta (sólo en Modo A), cita cada expense relevante
+  con el formato:
       [ver recibo](/expenses/{expense_id})
   Una línea por expense, máximo 5 citas. El `{expense_id}` debe ser
   copiado letra por letra desde `tool_result`.
