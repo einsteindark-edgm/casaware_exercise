@@ -36,9 +36,16 @@ variable "workspace_route_table_id" {
 }
 
 variable "vpc_peering_enabled" {
-  description = "Crea peering connection + routes + Route53 Resolver. Plan B+++ (DLT classic)."
+  description = <<-EOT
+    Crea peering connection + routes + Route53 Resolver. Plan B+++ (DLT classic).
+
+    DEFAULT IS true.  Bronze CDC depends on this. If you set it to false in a
+    future apply WITHOUT meaning to (e.g. forgetting to pass tfvars), Terraform
+    will try to tear down the peering and routes — `prevent_destroy` will abort
+    the plan loudly, which is the desired safety net.
+  EOT
   type        = bool
-  default     = false
+  default     = true
 }
 
 # ── VPC Peering Connection ────────────────────────────────────────────
@@ -101,8 +108,14 @@ resource "aws_route" "msk_to_databricks_private" {
   destination_cidr_block    = var.workspace_vpc_cidr
   vpc_peering_connection_id = aws_vpc_peering_connection.databricks_msk[0].id
 
+  # ignore_changes = all → if Terraform sees drift in this resource (e.g. the
+  # auto-heal Lambda recreated the route under a different `Origin`), it will
+  # NOT try to "fix" it by replacing. Combined with prevent_destroy this means
+  # the only way to remove this route via Terraform is to delete the resource
+  # block (intentional, code-review-able) — not a stray `-replace` or toggle.
   lifecycle {
     prevent_destroy = true
+    ignore_changes  = all
   }
 }
 
@@ -118,6 +131,7 @@ resource "aws_route" "databricks_to_msk" {
 
   lifecycle {
     prevent_destroy = true
+    ignore_changes  = all
   }
 }
 

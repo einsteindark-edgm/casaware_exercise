@@ -10,5 +10,9 @@ terraform {
       source  = "databricks/databricks"
       version = "~> 1.50"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
   }
 }
