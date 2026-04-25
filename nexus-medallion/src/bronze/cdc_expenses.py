@@ -69,15 +69,13 @@ def mongodb_cdc_expenses():
         .option("subscribe", "nexus.nexus_dev.expenses")
         .option("startingOffsets", "latest")
         .option("failOnDataLoss", "false")
-        .option("kafka.security.protocol", "SASL_SSL")
-        .option("kafka.sasl.mechanism", "AWS_MSK_IAM")
+        # UC Service Credential — Databricks DBR ≥16.1 firma SASL IAM
+        # con el role asociado. Sin este option, cae en AWS SDK default
+        # chain (que falla porque el cluster classic no tiene instance
+        # profile).
         .option(
-            "kafka.sasl.jaas.config",
-            "shadedmskiam.software.amazon.msk.auth.iam.IAMLoginModule required;",
-        )
-        .option(
-            "kafka.sasl.client.callback.handler.class",
-            "shadedmskiam.software.amazon.msk.auth.iam.IAMClientCallbackHandler",
+            "databricks.serviceCredential",
+            spark.conf.get("nexus.msk_service_credential"),
         )
         .load()
         .filter(col("value").isNotNull())

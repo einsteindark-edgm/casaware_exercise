@@ -41,6 +41,13 @@ resources:
       configuration:
         nexus.catalog: ${var.catalog}
         nexus.msk_bootstrap: ${var.msk_bootstrap_servers}
+        # El UC Service Credential firma SASL IAM cuando el notebook
+        # pasa .option("databricks.serviceCredential", <name>). Sin ese
+        # option, el cliente Kafka cae en la AWS SDK default chain y
+        # falla con "Unable to load AWS credentials" porque el cluster
+        # classic no tiene instance profile (correcto: queremos auth
+        # por UC, no por instance profile).
+        nexus.msk_service_credential: ${var.msk_service_credential}
 
       credentials:
         - name: ${var.msk_service_credential}

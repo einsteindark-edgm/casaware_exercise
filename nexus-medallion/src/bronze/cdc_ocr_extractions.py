@@ -53,15 +53,9 @@ def mongodb_cdc_ocr_extractions():
         .option("subscribe", "nexus.nexus_dev.ocr_extractions")
         .option("startingOffsets", "latest")
         .option("failOnDataLoss", "false")
-        .option("kafka.security.protocol", "SASL_SSL")
-        .option("kafka.sasl.mechanism", "AWS_MSK_IAM")
         .option(
-            "kafka.sasl.jaas.config",
-            "shadedmskiam.software.amazon.msk.auth.iam.IAMLoginModule required;",
-        )
-        .option(
-            "kafka.sasl.client.callback.handler.class",
-            "shadedmskiam.software.amazon.msk.auth.iam.IAMClientCallbackHandler",
+            "databricks.serviceCredential",
+            spark.conf.get("nexus.msk_service_credential"),
         )
         .load()
         .filter(col("value").isNotNull())
