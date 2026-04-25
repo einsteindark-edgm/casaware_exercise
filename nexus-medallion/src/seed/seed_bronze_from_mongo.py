@@ -36,6 +36,7 @@ mongo_db = dbutils.widgets.get("mongodb_db")
 mongo_uri = dbutils.secrets.get(scope=scope, key="mongodb_uri")
 
 # COMMAND ----------
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -101,6 +102,10 @@ OCR_EXTRACTIONS_SCHEMA = StructType(
         StructField("ocr_date_confidence", DoubleType(), True),
         StructField("ocr_currency", StringType(), True),
         StructField("avg_confidence", DoubleType(), True),
+        # JSON string with summary_fields[] + line_items[] (see Temporal
+        # activity textract.py::_extract_extra). Carried opaque through
+        # bronze; gold.expense_chunks parses it into chunk_text.
+        StructField("ocr_extra", StringType(), True),
         StructField("textract_raw_s3_key", StringType(), True),
         StructField("extracted_at", TimestampType(), False),
     ]
@@ -259,6 +264,8 @@ def hitl_to_row(d):
 
 
 def ocr_to_row(d):
+    extra = d.get("ocr_extra")
+    extra_json = json.dumps(extra) if isinstance(extra, dict) else extra
     return Row(
         expense_id=d["expense_id"],
         tenant_id=d["tenant_id"],
@@ -271,6 +278,7 @@ def ocr_to_row(d):
         ocr_date_confidence=d.get("ocr_date_confidence"),
         ocr_currency=d.get("ocr_currency"),
         avg_confidence=d.get("avg_confidence"),
+        ocr_extra=extra_json,
         textract_raw_s3_key=d.get("textract_raw_s3_key"),
         extracted_at=d.get("extracted_at", d.get("created_at")),
         __op="c",

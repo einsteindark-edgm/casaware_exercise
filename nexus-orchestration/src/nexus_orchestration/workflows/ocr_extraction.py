@@ -104,6 +104,8 @@ class OCRExtractionWorkflow:
                 **result["fields"],
                 "avg_confidence": result["avg_confidence"],
                 "textract_raw_s3_key": result.get("raw_output_s3_key"),
+                "ocr_extra": result.get("ocr_extra")
+                or {"summary_fields": [], "line_items": []},
             },
             start_to_close_timeout=timedelta(seconds=10),
         )
@@ -119,6 +121,7 @@ class OCRExtractionWorkflow:
                 "details": {
                     "avg_confidence": result["avg_confidence"],
                     "fields_summary": result.get("fields_summary", []),
+                    "line_items": (result.get("ocr_extra") or {}).get("line_items", []),
                 },
             },
             start_to_close_timeout=timedelta(seconds=5),
@@ -155,13 +158,31 @@ def _merge_extractions(primary: dict[str, Any], fallback: dict[str, Any]) -> dic
         if isinstance(v, dict)
     ]
     avg = round(sum(confidences) / max(len(confidences), 1), 2)
+    # Queries fallback never produces extras (it only re-asks the 3 core
+    # fields), so `ocr_extra` flows through from the primary AnalyzeExpense
+    # response. If the primary returned nothing, fall back to whatever the
+    # queries branch provided (likely empty lists).
+    extra = primary.get("ocr_extra") or fallback.get("ocr_extra") or {
+        "summary_fields": [],
+        "line_items": [],
+    }
+    summary = [
+        {"field": k, "value": v.get("value"), "confidence": v.get("confidence")}
+        for k, v in merged_fields.items()
+    ]
+    for f in extra.get("summary_fields", []):
+        summary.append(
+            {
+                "field": f.get("field"),
+                "value": f.get("value"),
+                "confidence": f.get("confidence"),
+            }
+        )
     return {
         "raw_output_s3_key": primary.get("raw_output_s3_key")
         or fallback.get("raw_output_s3_key"),
         "fields": merged_fields,
         "avg_confidence": avg,
-        "fields_summary": [
-            {"field": k, "value": v.get("value"), "confidence": v.get("confidence")}
-            for k, v in merged_fields.items()
-        ],
+        "fields_summary": summary,
+        "ocr_extra": extra,
     }

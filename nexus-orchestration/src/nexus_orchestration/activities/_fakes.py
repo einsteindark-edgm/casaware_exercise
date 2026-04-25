@@ -58,15 +58,34 @@ def fake_textract_extract(
         "ocr_date": {"value": ocr_date, "confidence": 91.2},
     }
     avg = sum(f["confidence"] for f in fields.values()) / len(fields)
+    # Synthetic extras so the medallion + frontend code paths exercise the
+    # extra-fields branch under fake mode too.
+    subtotal = round(ocr_amount * 0.9, 2)
+    tax = round(ocr_amount * 0.1, 2)
+    extra = {
+        "summary_fields": [
+            {"field": "subtotal", "value": str(subtotal), "confidence": 95.0},
+            {"field": "tax", "value": str(tax), "confidence": 94.5},
+            {"field": "vendor_address", "value": "123 Fake St, Stub City", "confidence": 88.0},
+        ],
+        "line_items": [
+            {"item": f"{user_vendor} item", "price": str(ocr_amount), "quantity": "1", "confidence_avg": 92.5},
+        ],
+    }
     return {
         "raw_output_s3_key": f"fake/tenant/expense/{s3_key}.json",
         "fields": fields,
         "avg_confidence": round(avg, 2),
         "fields_summary": [
-            {"field": "amount", "value": ocr_amount, "confidence": 99.1},
-            {"field": "vendor", "value": ocr_vendor, "confidence": 96.4},
-            {"field": "date", "value": ocr_date, "confidence": 91.2},
+            {"field": "ocr_total", "value": ocr_amount, "confidence": 99.1},
+            {"field": "ocr_vendor", "value": ocr_vendor, "confidence": 96.4},
+            {"field": "ocr_date", "value": ocr_date, "confidence": 91.2},
+            *[
+                {"field": f["field"], "value": f["value"], "confidence": f["confidence"]}
+                for f in extra["summary_fields"]
+            ],
         ],
+        "ocr_extra": extra,
     }
 
 

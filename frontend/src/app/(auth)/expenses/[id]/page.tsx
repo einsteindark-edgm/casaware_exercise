@@ -69,6 +69,159 @@ function formatDetails(details: Record<string, unknown>): string {
     .join(" · ");
 }
 
+interface OcrField {
+  field?: string;
+  value?: unknown;
+  confidence?: number;
+}
+
+interface OcrLineItem {
+  item?: string;
+  price?: string;
+  quantity?: string;
+  unit_price?: string;
+  product_code?: string;
+  confidence_avg?: number;
+}
+
+function confidenceColor(conf: number | undefined): string {
+  if (conf == null) return "bg-gray-100 text-gray-600";
+  if (conf >= 90) return "bg-green-100 text-green-700";
+  if (conf >= 70) return "bg-yellow-100 text-yellow-800";
+  return "bg-red-100 text-red-700";
+}
+
+function formatFieldLabel(raw: string | undefined): string {
+  if (!raw) return "";
+  return raw.replace(/^ocr_/, "").replace(/_/g, " ");
+}
+
+function formatValue(v: unknown): string {
+  if (v == null || v === "") return "—";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+
+function EventDetails({ event }: { event: ExpenseEvent }) {
+  const d = event.details || {};
+
+  if (event.event_type === "ocr_completed") {
+    const fields = (d.fields_summary as OcrField[] | undefined) || [];
+    const lineItems = (d.line_items as OcrLineItem[] | undefined) || [];
+    const avg = d.avg_confidence as number | undefined;
+    return (
+      <div className="mt-2 space-y-2">
+        {avg != null && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">Avg confidence:</span>
+            <span className={`text-xs px-2 py-0.5 rounded font-medium ${confidenceColor(avg)}`}>
+              {avg.toFixed(1)}%
+            </span>
+          </div>
+        )}
+        {fields.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+            {fields.map((f, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs">
+                <span className="text-gray-500 capitalize min-w-[110px]">{formatFieldLabel(f.field)}:</span>
+                <span className="text-gray-800 font-medium truncate">{formatValue(f.value)}</span>
+                {f.confidence != null && (
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] ${confidenceColor(f.confidence)}`}>
+                    {Math.round(f.confidence)}%
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {lineItems.length > 0 && (
+          <div className="mt-2">
+            <p className="text-xs text-gray-500 mb-1">Line items ({lineItems.length}):</p>
+            <ul className="text-xs space-y-0.5 pl-3 border-l border-gray-200">
+              {lineItems.map((li, i) => (
+                <li key={i} className="flex items-center gap-2">
+                  <span className="text-gray-700">{li.quantity ? `${li.quantity}× ` : ""}{li.item || "(item)"}</span>
+                  {li.price && <span className="text-gray-500">— {li.price}</span>}
+                  {li.confidence_avg != null && (
+                    <span className={`px-1 py-0.5 rounded text-[10px] ${confidenceColor(li.confidence_avg)}`}>
+                      {Math.round(li.confidence_avg)}%
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (event.event_type === "hitl_required") {
+    const conflicts = (d.fields_in_conflict as Array<Record<string, unknown>> | undefined) || [];
+    if (conflicts.length === 0) return null;
+    return (
+      <div className="mt-2 space-y-1">
+        <p className="text-xs text-gray-500">Fields needing review:</p>
+        {conflicts.map((c, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-medium text-gray-800 capitalize">{String(c.field)}:</span>
+            <span className="text-gray-600">user={formatValue(c.user_value)}</span>
+            <span className="text-gray-600">ocr={formatValue(c.ocr_value)}</span>
+            {c.confidence != null && (
+              <span className={`px-1.5 py-0.5 rounded text-[10px] ${confidenceColor(c.confidence as number)}`}>
+                {Math.round(c.confidence as number)}%
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (event.event_type === "approved") {
+    const sources = (d.source_per_field as Record<string, string> | undefined) || {};
+    const final = (d.final_data as Record<string, unknown> | undefined) || {};
+    const keys = Object.keys(final);
+    if (keys.length === 0) return null;
+    return (
+      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
+        {keys.map((k) => (
+          <div key={k} className="flex items-center gap-2 text-xs">
+            <span className="text-gray-500 capitalize min-w-[80px]">{k}:</span>
+            <span className="text-gray-800 font-medium">{formatValue(final[k])}</span>
+            {sources[k] && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">
+                {sources[k]}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (event.event_type === "ocr_started") {
+    const key = d.s3_key as string | undefined;
+    return key ? <p className="mt-1 text-xs text-gray-500 truncate">s3://{key}</p> : null;
+  }
+
+  if (event.event_type === "failed") {
+    const reason = d.reason as string | undefined;
+    const message = d.message as string | undefined;
+    return (
+      <div className="mt-1 text-xs text-red-700">
+        {reason && <span className="font-medium">{reason}</span>}
+        {message && <span className="ml-1 text-red-600">— {message}</span>}
+      </div>
+    );
+  }
+
+  // Fallback for unknown event types — keep the legacy behavior so we don't
+  // hide data we haven't styled yet.
+  const fallback = formatDetails(d);
+  return fallback ? <p className="mt-1 text-xs text-gray-600 font-mono break-all">{fallback}</p> : null;
+}
+
 function stateFromExpense(status: ExpenseRead["status"]): TimelineState {
   switch (status) {
     case "pending":
@@ -230,6 +383,11 @@ export default function ExpenseDetailPage() {
           const step = stepPayload.step as string | undefined;
           const mapped = stateFromWorkflowStep(step);
           if (mapped) next = next ? maxState(next, mapped) : mapped;
+          // Each step transition has a corresponding `expense_events` write
+          // in Mongo (ocr_started, ocr_completed, hitl_required, approved,
+          // failed). Refresh so the Receipt History card reflects them live
+          // instead of waiting for workflow.completed.
+          shouldRefreshHistory = true;
           break;
         }
         case "workflow.ocr_progress":
@@ -460,31 +618,26 @@ export default function ExpenseDetailPage() {
             <p className="text-sm text-gray-500">{hydrating ? "Loading history..." : "No events recorded."}</p>
           ) : (
             <ul className="space-y-4">
-              {history.map((event) => {
-                const detailsStr = formatDetails(event.details || {});
-                return (
-                  <li key={event.event_id} className="flex gap-3">
-                    <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-500" />
-                    <div className="flex-1">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <p className="text-sm font-medium text-gray-900">
-                          {formatEventLabel(event.event_type)}
-                        </p>
-                        <span className="text-xs text-gray-400 shrink-0">
-                          {new Date(event.created_at).toLocaleString()}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500">
-                        {event.actor.type === "user" ? "User" : event.actor.type === "system" ? "System" : event.actor.type}
-                        {event.actor.id ? ` · ${event.actor.id}` : ""}
+              {history.map((event) => (
+                <li key={event.event_id} className="flex gap-3">
+                  <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-500" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className="text-sm font-medium text-gray-900">
+                        {formatEventLabel(event.event_type)}
                       </p>
-                      {detailsStr && (
-                        <p className="mt-1 text-xs text-gray-600 font-mono break-all">{detailsStr}</p>
-                      )}
+                      <span className="text-xs text-gray-400 shrink-0">
+                        {new Date(event.created_at).toLocaleString()}
+                      </span>
                     </div>
-                  </li>
-                );
-              })}
+                    <p className="text-xs text-gray-500">
+                      {event.actor.type === "user" ? "User" : event.actor.type === "system" ? "System" : event.actor.type}
+                      {event.actor.id ? ` · ${event.actor.id}` : ""}
+                    </p>
+                    <EventDetails event={event} />
+                  </div>
+                </li>
+              ))}
             </ul>
           )}
         </CardContent>

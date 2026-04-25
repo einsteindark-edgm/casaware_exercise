@@ -62,11 +62,13 @@ async def textract_analyze_expense(inp: dict[str, Any]) -> dict[str, Any]:
     )
 
     summary_fields = _normalize_summary_fields(response)
+    extra = _extract_extra(response)
     return {
         "raw_output_s3_key": output_key,
         "fields": summary_fields,
         "avg_confidence": _compute_avg_confidence(summary_fields),
-        "fields_summary": _build_summary(summary_fields),
+        "fields_summary": _build_summary(summary_fields, extra),
+        "ocr_extra": extra,
     }
 
 
@@ -97,6 +99,13 @@ async def textract_analyze_document_queries(inp: dict[str, Any]) -> dict[str, An
 
 
 def _normalize_summary_fields(response: dict[str, Any]) -> dict[str, Any]:
+    """Maps the 3 'authoritative' Textract fields used by silver/gold joins.
+
+    Anything outside this mapping flows into `ocr_extra` instead — see
+    `_extract_extra`. Keep this list in lockstep with the bronze CDC schema
+    (`nexus-medallion/src/bronze/cdc_ocr_extractions.py`) and the
+    silver→gold ocr enrichment in `gold/expense_audit.py`.
+    """
     out: dict[str, Any] = {}
     mapping = {
         "TOTAL": "ocr_total",
@@ -117,6 +126,108 @@ def _normalize_summary_fields(response: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# Textract SummaryField types we want as named columns (lowercase) inside
+# `ocr_extra.summary_fields`. Anything Textract returns that's not in this
+# list still makes it through tagged as its raw Type — we'd rather over-
+# capture than drop something that could be useful for RAG.
+_KNOWN_SUMMARY_TYPES = {
+    "SUBTOTAL": "subtotal",
+    "TAX": "tax",
+    "AMOUNT_PAID": "amount_paid",
+    "AMOUNT_DUE": "amount_due",
+    "INVOICE_RECEIPT_ID": "invoice_id",
+    "PO_NUMBER": "po_number",
+    "RECEIVER_NAME": "receiver_name",
+    "RECEIVER_ADDRESS": "receiver_address",
+    "VENDOR_ADDRESS": "vendor_address",
+    "VENDOR_PHONE": "vendor_phone",
+    "VENDOR_URL": "vendor_url",
+    "VENDOR_GST_NUMBER": "vendor_tax_id",
+    "PAYMENT_TERMS": "payment_terms",
+    "DUE_DATE": "due_date",
+    "DELIVERY_DATE": "delivery_date",
+    "ORDER_DATE": "order_date",
+    "ACCOUNT_NUMBER": "account_number",
+    "TRACKING_NUMBER": "tracking_number",
+    "STREET": "street",
+    "CITY": "city",
+    "STATE": "state",
+    "ZIP_CODE": "zip_code",
+    "COUNTRY": "country",
+    "ADDRESS_BLOCK": "address_block",
+}
+
+# These three are owned by `_normalize_summary_fields`; don't duplicate them
+# under `ocr_extra` or the chunk_text would say the total twice.
+_AUTHORITATIVE_TYPES = {"TOTAL", "VENDOR_NAME", "INVOICE_RECEIPT_DATE"}
+
+
+def _extract_extra(response: dict[str, Any]) -> dict[str, Any]:
+    """Capture every Textract field that isn't one of the 3 authoritative ones.
+
+    Returns:
+        {
+          "summary_fields": [{field, value, confidence}, ...],
+          "line_items":    [{item, price, quantity, confidence_avg}, ...],
+        }
+
+    Both lists come from Textract `analyze_expense`. Confidence is preserved
+    so the UI can color-code low-confidence values, and so the embedding
+    can later weight (or skip) noisy fields.
+    """
+    summary_extra: list[dict[str, Any]] = []
+    line_items: list[dict[str, Any]] = []
+
+    for doc in response.get("ExpenseDocuments", []):
+        for field in doc.get("SummaryFields", []):
+            raw_type = (field.get("Type") or {}).get("Text", "OTHER")
+            if raw_type in _AUTHORITATIVE_TYPES:
+                continue
+            value_detection = field.get("ValueDetection") or {}
+            label = field.get("LabelDetection") or {}
+            summary_extra.append(
+                {
+                    "field": _KNOWN_SUMMARY_TYPES.get(raw_type, raw_type.lower()),
+                    "value": value_detection.get("Text"),
+                    "confidence": value_detection.get("Confidence", 0.0),
+                    "label_text": label.get("Text"),
+                }
+            )
+
+        for group in doc.get("LineItemGroups", []):
+            for li in group.get("LineItems", []):
+                cells: dict[str, Any] = {}
+                confs: list[float] = []
+                for f in li.get("LineItemExpenseFields", []):
+                    raw_type = (f.get("Type") or {}).get("Text", "OTHER")
+                    value_detection = f.get("ValueDetection") or {}
+                    txt = value_detection.get("Text")
+                    conf = float(value_detection.get("Confidence") or 0.0)
+                    if conf:
+                        confs.append(conf)
+                    if raw_type == "ITEM":
+                        cells["item"] = txt
+                    elif raw_type == "PRICE":
+                        cells["price"] = txt
+                    elif raw_type == "QUANTITY":
+                        cells["quantity"] = txt
+                    elif raw_type == "UNIT_PRICE":
+                        cells["unit_price"] = txt
+                    elif raw_type == "PRODUCT_CODE":
+                        cells["product_code"] = txt
+                    elif raw_type == "EXPENSE_ROW":
+                        cells.setdefault("row_text", txt)
+                    else:
+                        cells[raw_type.lower()] = txt
+                if cells:
+                    cells["confidence_avg"] = (
+                        round(sum(confs) / len(confs), 2) if confs else 0.0
+                    )
+                    line_items.append(cells)
+
+    return {"summary_fields": summary_extra, "line_items": line_items}
+
+
 def _compute_avg_confidence(fields: dict[str, Any]) -> float:
     if not fields:
         return 0.0
@@ -126,11 +237,29 @@ def _compute_avg_confidence(fields: dict[str, Any]) -> float:
     return round(sum(confidences) / max(len(confidences), 1), 2)
 
 
-def _build_summary(fields: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
+def _build_summary(
+    fields: dict[str, Any], extra: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """Flat list rendered in the timeline event (ocr_completed.details).
+
+    Authoritative fields first (total / vendor / date), then everything in
+    `extra.summary_fields`. Line items are NOT in this list — the UI shows
+    them in a separate section.
+    """
+    out: list[dict[str, Any]] = [
         {"field": k, "value": v.get("value"), "confidence": v.get("confidence")}
         for k, v in fields.items()
     ]
+    if extra:
+        for f in extra.get("summary_fields", []):
+            out.append(
+                {
+                    "field": f.get("field"),
+                    "value": f.get("value"),
+                    "confidence": f.get("confidence"),
+                }
+            )
+    return out
 
 
 def _response_from_queries(response: dict[str, Any]) -> dict[str, Any]:
@@ -157,9 +286,11 @@ def _response_from_queries(response: dict[str, Any]) -> dict[str, Any]:
             if key and key not in fields:
                 fields[key] = {"value": text, "confidence": conf}
                 break
+    extra = {"summary_fields": [], "line_items": []}
     return {
         "raw_output_s3_key": None,
         "fields": fields,
         "avg_confidence": _compute_avg_confidence(fields),
-        "fields_summary": _build_summary(fields),
+        "fields_summary": _build_summary(fields, extra),
+        "ocr_extra": extra,
     }

@@ -14,6 +14,13 @@ from pyspark.sql.types import (
     StructType,
 )
 
+# NOTE: `ocr_extra` is a JSON sub-document in Mongo (summary_fields[],
+# line_items[]). Debezium emits it as a JSON string when forwarded over
+# Kafka because the topic value is a single JSON envelope. We carry it
+# through bronze as STRING and parse on demand in `gold.expense_chunks`
+# to compose enriched chunk_text for vector search. Keeping it opaque
+# here means schema changes inside ocr_extra (new line-item columns,
+# new SummaryField types) don't require a bronze backfill.
 OCR_JSON_SCHEMA = StructType(
     [
         StructField("expense_id", StringType()),
@@ -27,6 +34,7 @@ OCR_JSON_SCHEMA = StructType(
         StructField("ocr_date_confidence", DoubleType()),
         StructField("ocr_currency", StringType()),
         StructField("avg_confidence", DoubleType()),
+        StructField("ocr_extra", StringType()),
         StructField("textract_raw_s3_key", StringType()),
         StructField("extracted_at", StringType()),
         StructField("created_at", StringType()),
@@ -72,6 +80,7 @@ def mongodb_cdc_ocr_extractions():
             col("p.ocr_date_confidence").alias("ocr_date_confidence"),
             col("p.ocr_currency").alias("ocr_currency"),
             col("p.avg_confidence").alias("avg_confidence"),
+            col("p.ocr_extra").alias("ocr_extra"),
             col("p.textract_raw_s3_key").alias("textract_raw_s3_key"),
             col("p.extracted_at").cast("timestamp").alias("extracted_at"),
             col("p.__op").alias("__op"),

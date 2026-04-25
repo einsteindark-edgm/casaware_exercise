@@ -35,6 +35,8 @@ def v_ocr_cdc_cleansed():
             col("ocr_date_confidence").cast("double"),
             col("ocr_currency"),
             col("avg_confidence").cast("double"),
+            # JSON string carried opaque from bronze; gold parses on demand.
+            col("ocr_extra"),
             col("textract_raw_s3_key"),
             col("extracted_at").cast("timestamp"),
             col("__op").alias("_op"),

@@ -43,12 +43,16 @@ def expense_audit():
     expenses = dlt.read("silver.expenses").where("status = 'approved'")
 
     # OCR enrichment: una fila por expense_id.
+    # `ocr_extra` (JSON string with line items + extra summary fields like
+    # tax/subtotal/vendor_address) feeds gold.expense_chunks chunk_text so
+    # the RAG agent can answer questions like "what tax did I pay at X?".
     ocr = spark.read.table(f"{catalog}.silver.ocr_extractions").select(
         col("expense_id"),
         col("ocr_total"),
         col("ocr_vendor"),
         col("ocr_date"),
         col("ocr_currency"),
+        col("ocr_extra"),
     )
 
     # HITL enrichment: agrupamos por expense_id porque en teoría un mismo
@@ -102,5 +106,8 @@ def expense_audit():
             col("hitl_resolved_at"),
             # Breadcrumb correlation — link al X-Ray trace que originó el expense.
             col("trace_id"),
+            # JSON con line_items y summary_fields adicionales (tax, subtotal,
+            # vendor_address, etc.). gold.expense_chunks lo desempaqueta.
+            col("ocr_extra"),
         )
     )

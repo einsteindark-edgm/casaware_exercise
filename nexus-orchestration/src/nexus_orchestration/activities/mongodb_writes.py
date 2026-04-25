@@ -33,7 +33,13 @@ def _now() -> datetime:
 
 @activity.defn(name="upsert_ocr_extraction")
 async def upsert_ocr_extraction(inp: dict[str, Any]) -> None:
-    """Persists the normalised OCR result. CDC replicates it to silver.ocr_extractions."""
+    """Persists the normalised OCR result. CDC replicates it to silver.ocr_extractions.
+
+    `ocr_extra` carries every Textract field we don't promote to a dedicated
+    column (line items, tax, subtotal, vendor address, etc.). Debezium
+    serializes it as a JSON string into the bronze CDC stream so downstream
+    `gold.expense_chunks` can fold it into chunk_text for vector search.
+    """
     doc = {
         "tenant_id": inp["tenant_id"],
         "user_id": inp.get("user_id"),
@@ -44,6 +50,7 @@ async def upsert_ocr_extraction(inp: dict[str, Any]) -> None:
         "ocr_date": (inp.get("ocr_date") or {}).get("value"),
         "ocr_date_confidence": (inp.get("ocr_date") or {}).get("confidence"),
         "avg_confidence": inp.get("avg_confidence"),
+        "ocr_extra": inp.get("ocr_extra") or {"summary_fields": [], "line_items": []},
         "textract_raw_s3_key": inp.get("textract_raw_s3_key"),
         "extracted_by_workflow_id": activity.info().workflow_id,
         "extracted_at": _now(),
