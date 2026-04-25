@@ -76,8 +76,11 @@ resource "aws_ecs_task_definition" "worker" {
       { name = "OTEL_SERVICE_NAME", value = "nexus-worker" },
       { name = "OTEL_RESOURCE_ATTRIBUTES", value = "service.namespace=nexus,deployment.environment=dev" },
       { name = "OTEL_PROPAGATORS", value = "tracecontext,xray" },
-      { name = "OTEL_TRACES_SAMPLER", value = "parentbased_traceidratio" },
-      { name = "OTEL_TRACES_SAMPLER_ARG", value = "0.05" },
+      # Phase E.5d — sampling 100% en dev. Worker hereda decisión del padre
+      # (backend), pero si arranca un span propio (cron, retry) lo captura
+      # también. Bajar en staging/prod.
+      { name = "OTEL_TRACES_SAMPLER", value = "parentbased_always_on" },
+      { name = "OTEL_TRACES_SAMPLER_ARG", value = "" },
     ]
 
     secrets = [

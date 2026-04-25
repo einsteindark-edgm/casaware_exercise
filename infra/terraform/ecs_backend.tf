@@ -60,8 +60,11 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "OTEL_SERVICE_NAME", value = "nexus-backend" },
       { name = "OTEL_RESOURCE_ATTRIBUTES", value = "service.namespace=nexus,deployment.environment=dev" },
       { name = "OTEL_PROPAGATORS", value = "tracecontext,xray" },
-      { name = "OTEL_TRACES_SAMPLER", value = "parentbased_traceidratio" },
-      { name = "OTEL_TRACES_SAMPLER_ARG", value = "0.05" },
+      # Phase E.5d — sampling 100% en dev para que ServiceLens muestre toda
+      # ejecución sin necesidad de ampliar la ventana a 3h. En staging/prod
+      # bajar a 0.05 (parentbased_traceidratio) o a `xray` con remote rules.
+      { name = "OTEL_TRACES_SAMPLER", value = "parentbased_always_on" },
+      { name = "OTEL_TRACES_SAMPLER_ARG", value = "" },
     ]
 
     secrets = [
