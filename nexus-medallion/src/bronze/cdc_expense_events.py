@@ -23,6 +23,10 @@ EVENTS_JSON_SCHEMA = StructType(
         StructField("actor", StringType()),
         StructField("details", MapType(StringType(), StringType())),
         StructField("workflow_id", StringType()),
+        # Phase E.4 — breadcrumb trace_id propagated from backend/worker via
+        # metadata.trace_id (W3C trace-context, 32-char hex). Lets us join
+        # expense_events with X-Ray traces in the Databricks dashboard.
+        StructField("metadata", MapType(StringType(), StringType())),
         StructField("created_at", StringType()),
         StructField("__op", StringType()),
         StructField("__source_ts_ms", LongType()),
@@ -62,6 +66,7 @@ def mongodb_cdc_expense_events():
             col("p.actor").alias("actor"),
             col("p.details").alias("details"),
             col("p.workflow_id").alias("workflow_id"),
+            col("p.metadata").alias("metadata"),
             col("p.created_at").cast("timestamp").alias("created_at"),
             col("p.__op").alias("__op"),
             col("p.__source_ts_ms").alias("__source_ts_ms"),

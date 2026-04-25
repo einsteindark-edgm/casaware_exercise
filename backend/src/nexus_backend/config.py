@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     rate_limit_default: str = "100/minute"
 
     xray_enabled: bool = False
+    otel_enabled: bool = False
     log_level: str = "INFO"
 
     expense_history_cache: bool = False

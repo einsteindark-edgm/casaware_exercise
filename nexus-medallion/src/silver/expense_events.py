@@ -7,7 +7,7 @@
 
 # COMMAND ----------
 import dlt
-from pyspark.sql.functions import col
+from pyspark.sql.functions import col, coalesce, lit
 
 
 @dlt.view(name="bronze_events_source")
@@ -30,6 +30,14 @@ def v_events_cdc_cleansed():
             col("actor"),
             col("details"),
             col("workflow_id"),
+            col("metadata"),
+            # Phase E.4 — promote breadcrumb trace_id from metadata so
+            # downstream queries (gold + dashboard) can filter without map
+            # lookups. Older bronze rows (pre-Phase E.4) won't have it; fall
+            # back to NULL so the column type stays stable.
+            coalesce(col("metadata").getItem("trace_id"), lit(None).cast("string")).alias(
+                "trace_id"
+            ),
             col("created_at").cast("timestamp"),
             col("__op").alias("_op"),
             col("__source_ts_ms").alias("_source_ts_ms"),

@@ -40,15 +40,18 @@ class Settings(BaseSettings):
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
 
-    # Fake mode: stub external providers (Textract / Bedrock / Vector Search)
-    fake_providers: bool = True
+    # Fake mode: stub external providers (Textract / Bedrock / Vector Search /
+    # Databricks SQL). Default False — production path is real. Flip
+    # FAKE_PROVIDERS=true for isolated unit-style runs, or flip individual
+    # providers via FAKE_TEXTRACT / FAKE_BEDROCK / FAKE_VECTOR_SEARCH /
+    # FAKE_SQL_SEARCH.
+    fake_providers: bool = False
 
     # Per-provider overrides. When unset, each falls back to fake_providers.
-    # Lets you unlock providers individually as credentials become available.
-    # e.g. FAKE_TEXTRACT=false (+ real AWS keys) while Bedrock/VS stay fake.
     fake_textract: bool | None = None
     fake_bedrock: bool | None = None
     fake_vector_search: bool | None = None
+    fake_sql_search: bool | None = None
 
     # When fake_providers=True, controls how fake Textract compares against the
     # user-reported data:
@@ -70,7 +73,12 @@ class Settings(BaseSettings):
     databricks_vs_index: str | None = None
 
     # LLM
-    bedrock_model_id: str = "anthropic.claude-sonnet-4-6-20250514-v1:0"
+    # Cross-region inference profile. Default: Amazon Nova Pro (US geo).
+    # Nova is first-party AWS so it has no access-request form — good default
+    # for dev. Converse API + tool-use shape is identical to Claude's.
+    # Flip to "us.anthropic.claude-sonnet-4-6" once the Anthropic FTU form
+    # is approved in your account.
+    bedrock_model_id: str = "us.amazon.nova-pro-v1:0"
     anthropic_api_key: str | None = None
     llm_model: str = "claude-sonnet-4-6"
 
@@ -93,6 +101,51 @@ class Settings(BaseSettings):
         if self.fake_vector_search is None:
             return self.fake_providers
         return self.fake_vector_search
+
+    @property
+    def use_fake_sql_search(self) -> bool:
+        if self.fake_sql_search is None:
+            return self.fake_providers
+        return self.fake_sql_search
+
+    def validate_real_providers(self) -> list[str]:
+        """Return a list of human-readable problems preventing the non-fake
+        paths from running. Empty list → OK.
+
+        We do NOT check AWS credentials programmatically because boto3 uses
+        the full chain (env vars, shared config, instance roles, SSO) — any
+        programmatic test would be both flaky and noisy. boto3 surfaces the
+        real error on the first Bedrock call.
+        """
+        problems: list[str] = []
+        if not self.use_fake_bedrock:
+            if not self.bedrock_model_id:
+                problems.append("BEDROCK_MODEL_ID is required when FAKE_BEDROCK=false")
+            if not self.aws_region:
+                problems.append("AWS_REGION is required when FAKE_BEDROCK=false")
+        if not self.use_fake_vector_search:
+            missing = [
+                f
+                for f in ("databricks_host", "databricks_token", "databricks_vs_endpoint", "databricks_vs_index")
+                if not getattr(self, f)
+            ]
+            if missing:
+                problems.append(
+                    "Vector Search real mode requires: "
+                    + ", ".join(m.upper() for m in missing)
+                )
+        if not self.use_fake_sql_search:
+            missing = [
+                f
+                for f in ("databricks_host", "databricks_token", "databricks_warehouse_id")
+                if not getattr(self, f)
+            ]
+            if missing:
+                problems.append(
+                    "SQL search real mode requires: "
+                    + ", ".join(m.upper() for m in missing)
+                )
+        return problems
 
 
 settings = Settings()

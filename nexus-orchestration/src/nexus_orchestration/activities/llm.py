@@ -98,11 +98,13 @@ async def bedrock_converse(inp: dict[str, Any]) -> dict[str, Any]:
             "stop_reason": response["stopReason"],
         }
 
-    # Streaming path.
+    # Streaming path. Emits BEDROCK-format content blocks so the workflow can
+    # echo them back verbatim in the next turn without translation.
     response = client.converse_stream(**request)
     accumulated_content: list[dict[str, Any]] = []
     current_text = ""
     current_tool_use: dict[str, Any] | None = None
+    current_tool_input_json = ""
     stop_reason = "end_turn"
 
     redis_client = _get_redis()
@@ -120,29 +122,31 @@ async def bedrock_converse(inp: dict[str, Any]) -> dict[str, Any]:
                 current_text += token
                 await _publish_token(redis_client, tenant_id, user_id, workflow_id, token)
             elif "toolUse" in delta and current_tool_use is not None:
-                current_tool_use["input_json"] = current_tool_use.get(
-                    "input_json", ""
-                ) + delta["toolUse"].get("input", "")
+                current_tool_input_json += delta["toolUse"].get("input", "") or ""
         elif "contentBlockStart" in event:
             start = event["contentBlockStart"]["start"]
             if "toolUse" in start:
                 current_tool_use = {
-                    "type": "tool_use",
-                    "id": start["toolUse"]["toolUseId"],
-                    "name": start["toolUse"]["name"],
-                    "input_json": "",
+                    "toolUse": {
+                        "toolUseId": start["toolUse"]["toolUseId"],
+                        "name": start["toolUse"]["name"],
+                        "input": {},
+                    }
                 }
+                current_tool_input_json = ""
         elif "contentBlockStop" in event:
             if current_tool_use is not None:
-                input_json = current_tool_use.pop("input_json", "") or "{}"
                 try:
-                    current_tool_use["input"] = json.loads(input_json)
+                    current_tool_use["toolUse"]["input"] = (
+                        json.loads(current_tool_input_json) if current_tool_input_json else {}
+                    )
                 except Exception:
-                    current_tool_use["input"] = {}
+                    current_tool_use["toolUse"]["input"] = {}
                 accumulated_content.append(current_tool_use)
                 current_tool_use = None
+                current_tool_input_json = ""
             elif current_text:
-                accumulated_content.append({"type": "text", "text": current_text})
+                accumulated_content.append({"text": current_text})
                 current_text = ""
         elif "messageStop" in event:
             stop_reason = event["messageStop"]["stopReason"]

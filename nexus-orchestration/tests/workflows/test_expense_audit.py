@@ -86,6 +86,11 @@ async def mock_create_hitl(inp: dict[str, Any]) -> str:
     return f"hitl_test_{inp['expense_id']}"
 
 
+@activity.defn(name="trigger_vector_sync")
+async def mock_trigger_vector_sync(inp: dict[str, Any]) -> dict[str, Any]:
+    return {"status": "skipped_fake"}
+
+
 ALL_MOCK_ACTIVITIES = [
     mock_publish_event,
     mock_emit_expense_event,
@@ -97,6 +102,7 @@ ALL_MOCK_ACTIVITIES = [
     mock_upsert_ocr,
     mock_query_expense,
     mock_create_hitl,
+    mock_trigger_vector_sync,
     compare_fields,
 ]
 

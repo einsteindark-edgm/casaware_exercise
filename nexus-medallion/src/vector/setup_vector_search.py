@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS {source_table} (
     expense_id STRING,
     chunk_text STRING,
     amount DOUBLE,
+    currency STRING,
     vendor STRING,
     date STRING,
     category STRING,
@@ -45,6 +46,15 @@ CREATE TABLE IF NOT EXISTS {source_table} (
 TBLPROPERTIES (delta.enableChangeDataFeed = true)
 PARTITIONED BY (tenant_id)
 """)
+
+# Idempotent upgrade path for workspaces where the table was created before
+# `currency` was added. ALTER fails if the column already exists, so we
+# swallow that specific error.
+try:
+    spark.sql(f"ALTER TABLE {source_table} ADD COLUMNS (currency STRING)")  # noqa: S608
+except Exception as _exc:
+    if "already exists" not in str(_exc).lower():
+        raise
 
 spark.sql(f"""
 INSERT OVERWRITE {source_table}
@@ -59,6 +69,7 @@ SELECT
         '. Categoria:', category, '.'
     ) AS chunk_text,
     CAST(final_amount AS DOUBLE) AS amount,
+    final_currency AS currency,
     final_vendor AS vendor,
     CAST(final_date AS STRING) AS date,
     category,
@@ -135,7 +146,7 @@ if sample:
     print(f"Probando similarity_search con tenant_id={tenant}...")
     results = idx.similarity_search(
         query_text="cafe Starbucks",
-        columns=["chunk_id", "expense_id", "chunk_text", "amount", "vendor"],
+        columns=["chunk_id", "expense_id", "chunk_text", "amount", "currency", "vendor", "date"],
         num_results=3,
         filters={"tenant_id": tenant},
     )

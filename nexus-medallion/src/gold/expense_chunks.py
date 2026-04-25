@@ -45,6 +45,7 @@ def expense_chunks():
                 lit("."),
             ).alias("chunk_text"),
             col("final_amount").cast("double").alias("amount"),
+            col("final_currency").alias("currency"),
             col("final_vendor").alias("vendor"),
             col("final_date").cast("string").alias("date"),
             col("category"),

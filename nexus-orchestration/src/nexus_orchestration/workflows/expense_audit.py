@@ -192,7 +192,18 @@ class ExpenseAuditWorkflow:
             start_to_close_timeout=timedelta(seconds=5),
         )
 
-        # 5) Redis completion event.
+        # 5) Best-effort: trigger Vector Search sync so the new gold row gets
+        # embedded for the chat agent. We don't await CDC → DLT → embedding
+        # here (it's seconds–minutes downstream); we just kick the index sync
+        # so it doesn't sit cold. Failures are swallowed by the activity.
+        await workflow.execute_activity(
+            "trigger_vector_sync",
+            {"expense_id": expense_id, "tenant_id": tenant_id},
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=RetryPolicy(maximum_attempts=2),
+        )
+
+        # 6) Redis completion event.
         self._state = "completed"
         self._current_step = "completed"
         await workflow.execute_activity(

@@ -75,17 +75,77 @@ def fake_vector_search(query: str, tenant_filter: str, k: int = 5) -> list[dict[
     base_amount = 10.0 + (_hash_int(f"{tenant_filter}:{query}", mod=500) / 10)
     results = []
     for i in range(min(k, 3)):
+        expense_id = f"exp_FAKE{i:03d}"
         results.append(
             {
                 "chunk_id": f"chunk_{tenant_filter}_{i}",
-                "expense_id": f"exp_FAKE{i:03d}",
+                "expense_id": expense_id,
                 "chunk_text": f"[FAKE] Gasto en {query.split()[0] if query.split() else 'cafeteria'} por ${base_amount + i} USD.",
                 "date": "2026-03-15",
                 "vendor": "Starbucks" if i % 2 == 0 else "McDonalds",
                 "amount": base_amount + i,
+                "link": f"/expenses/{expense_id}",
+                "_source": "semantic",
             }
         )
     return results
+
+
+def fake_sql_search(
+    tool_input: dict[str, Any],
+    tenant_filter: str,
+    aggregate_kind: str,
+) -> dict[str, Any]:
+    """Deterministic synthetic SQL result.
+
+    Mirrors sql_search.search_expenses_structured's return shape. Seeded by
+    tenant + filter values so the same query returns the same rows during
+    tests.
+    """
+    seed = f"{tenant_filter}:{json.dumps(tool_input, sort_keys=True, default=str)}"
+    base_amount = 20.0 + (_hash_int(seed, mod=2000) / 10)
+    vendor = (tool_input.get("vendor") or "Uber").title()
+    currency = (tool_input.get("currency") or "COP").upper()
+    category = (tool_input.get("category") or "travel").lower()
+
+    rows: list[dict[str, Any]] = []
+    for i in range(3):
+        expense_id = f"exp_FAKESQL{_hash_int(seed + str(i), mod=10000):04d}"
+        rows.append(
+            {
+                "expense_id": expense_id,
+                "vendor": vendor,
+                "amount": round(base_amount * (i + 1), 2),
+                "currency": currency,
+                "date": f"2026-03-{10 + i:02d}",
+                "category": category,
+            }
+        )
+
+    if aggregate_kind == "sum":
+        total = round(sum(r["amount"] for r in rows), 2)
+        return {
+            "aggregate_kind": "sum",
+            "aggregate_value": total,
+            "currency": currency,
+            "rows": [],
+            "row_count_total": len(rows),
+        }
+    if aggregate_kind == "count":
+        return {
+            "aggregate_kind": "count",
+            "aggregate_value": len(rows),
+            "currency": None,
+            "rows": [],
+            "row_count_total": len(rows),
+        }
+    return {
+        "aggregate_kind": "list",
+        "aggregate_value": None,
+        "currency": None,
+        "rows": rows,
+        "row_count_total": len(rows),
+    }
 
 
 async def fake_bedrock_stream(
@@ -105,32 +165,94 @@ async def fake_bedrock_stream(
     """
     # If no tool results are in the message history, request the tool first.
     tools = tools or []
+    tool_names = {t.get("name") for t in tools}
     wants_tool = not _already_has_tool_result(messages)
-    if wants_tool and any(t.get("name") == "search_expenses" for t in tools):
+    if wants_tool and tool_names:
         user_text = _last_user_text(messages)
-        return {
-            "content": [
-                {
-                    "type": "tool_use",
-                    "id": f"toolu_fake_{_hash_int(user_text, mod=100000)}",
-                    "name": "search_expenses",
-                    "input": {"query": user_text, "k": 3},
-                }
-            ],
-            "stop_reason": "tool_use",
-        }
+        lower = user_text.lower()
+        # Heuristic routing: amount/count/vendor questions → structured SQL;
+        # otherwise fall back to semantic.
+        wants_structured = (
+            "search_expenses_structured" in tool_names
+            and any(
+                kw in lower
+                for kw in (
+                    "cuánto",
+                    "cuanto",
+                    "total",
+                    "suma",
+                    "cuántos",
+                    "cuantos",
+                    "uber",
+                    "starbucks",
+                )
+            )
+        )
+        if wants_structured:
+            return {
+                "content": [
+                    {
+                        "toolUse": {
+                            "toolUseId": f"toolu_fake_{_hash_int(user_text + 'sql', mod=100000)}",
+                            "name": "search_expenses_structured",
+                            "input": {
+                                "vendor": "Uber" if "uber" in lower else "Starbucks",
+                                "aggregate": "sum"
+                                if any(k in lower for k in ("cuánto", "cuanto", "total", "suma"))
+                                else "list",
+                            },
+                        }
+                    }
+                ],
+                "stop_reason": "tool_use",
+            }
+        # Legacy name `search_expenses` kept for back-compat with callers that
+        # still register the old spec.
+        semantic_name = (
+            "search_expenses_semantic"
+            if "search_expenses_semantic" in tool_names
+            else ("search_expenses" if "search_expenses" in tool_names else None)
+        )
+        if semantic_name:
+            return {
+                "content": [
+                    {
+                        "toolUse": {
+                            "toolUseId": f"toolu_fake_{_hash_int(user_text, mod=100000)}",
+                            "name": semantic_name,
+                            "input": {"query": user_text, "k": 3},
+                        }
+                    }
+                ],
+                "stop_reason": "tool_use",
+            }
 
     # Second call: emit a natural-language response, streaming tokens.
     tool_result = _extract_first_tool_result(messages)
     vendor = "Starbucks"
     amount = 0.0
+    currency = "USD"
     if isinstance(tool_result, list) and tool_result:
         first = tool_result[0]
         vendor = first.get("vendor", vendor)
+        currency = first.get("currency", currency)
         amount = sum(float(r.get("amount") or 0) for r in tool_result)
+    elif isinstance(tool_result, dict):
+        # SQL aggregate payload.
+        if tool_result.get("aggregate_kind") == "sum":
+            amount = float(tool_result.get("aggregate_value") or 0)
+            currency = tool_result.get("currency") or currency
+        elif tool_result.get("aggregate_kind") == "count":
+            amount = float(tool_result.get("aggregate_value") or 0)
+        rows = tool_result.get("rows") or []
+        if rows and isinstance(rows[0], dict):
+            vendor = rows[0].get("vendor", vendor)
+            currency = rows[0].get("currency", currency)
+            if amount == 0.0:
+                amount = sum(float(r.get("amount") or 0) for r in rows)
 
     answer = (
-        f"Según tus gastos, {vendor} suma aproximadamente ${amount:.2f} USD "
+        f"Según tus gastos, {vendor} suma aproximadamente ${amount:.2f} {currency} "
         f"en el periodo consultado."
     )
     tokens = [w + " " for w in answer.split(" ")]
@@ -165,7 +287,7 @@ async def fake_bedrock_stream(
             await _publish_token(tok)
 
     return {
-        "content": [{"type": "text", "text": answer}],
+        "content": [{"text": answer}],
         "stop_reason": "end_turn",
     }
 
@@ -188,7 +310,7 @@ def _already_has_tool_result(messages: list[dict[str, Any]]) -> bool:
         content = msg.get("content", [])
         if isinstance(content, list):
             for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_result":
+                if isinstance(block, dict) and isinstance(block.get("toolResult"), dict):
                     return True
     return False
 
@@ -198,16 +320,20 @@ def _extract_first_tool_result(messages: list[dict[str, Any]]) -> Any:
         content = msg.get("content", [])
         if isinstance(content, list):
             for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_result":
-                    items = block.get("content", [])
-                    for item in items:
-                        if isinstance(item, dict) and "json" in item:
-                            return item["json"]
-                        if isinstance(item, dict) and "text" in item:
-                            try:
-                                return json.loads(item["text"])
-                            except Exception:
-                                return item["text"]
+                if not isinstance(block, dict):
+                    continue
+                tr = block.get("toolResult")
+                if not isinstance(tr, dict):
+                    continue
+                items = tr.get("content", [])
+                for item in items:
+                    if isinstance(item, dict) and "json" in item:
+                        return item["json"]
+                    if isinstance(item, dict) and "text" in item:
+                        try:
+                            return json.loads(item["text"])
+                        except Exception:
+                            return item["text"]
     return None
 
 

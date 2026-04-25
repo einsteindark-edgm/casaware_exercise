@@ -5,7 +5,7 @@ resource "aws_ecs_cluster" "main" {
 
   setting {
     name  = "containerInsights"
-    value = "disabled"
+    value = "enhanced"
   }
 }
 
@@ -58,6 +58,7 @@ data "aws_iam_policy_document" "ecs_task_execution_extras" {
       aws_secretsmanager_secret.redis_url.arn,
       aws_secretsmanager_secret.databricks_host.arn,
       aws_secretsmanager_secret.databricks_token.arn,
+      aws_secretsmanager_secret.databricks_warehouse_id.arn,
       "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.prefix}/*",
     ]
   }
@@ -114,6 +115,31 @@ data "aws_iam_policy_document" "backend_task_policy" {
     effect    = "Allow"
     actions   = ["cognito-idp:AdminGetUser"]
     resources = [aws_cognito_user_pool.main.arn]
+  }
+
+  statement {
+    sid    = "XRayWrite"
+    effect = "Allow"
+    actions = [
+      "xray:PutTraceSegments",
+      "xray:PutTelemetryRecords",
+      "xray:GetSamplingRules",
+      "xray:GetSamplingTargets",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "CloudWatchMetrics"
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricData",
+      "logs:PutLogEvents",
+      "logs:CreateLogStream",
+      "logs:DescribeLogStreams",
+      "logs:DescribeLogGroups",
+    ]
+    resources = ["*"]
   }
 }
 
@@ -177,6 +203,31 @@ data "aws_iam_policy_document" "worker_task_policy" {
     actions = [
       "bedrock:InvokeModel",
       "bedrock:InvokeModelWithResponseStream",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "XRayWrite"
+    effect = "Allow"
+    actions = [
+      "xray:PutTraceSegments",
+      "xray:PutTelemetryRecords",
+      "xray:GetSamplingRules",
+      "xray:GetSamplingTargets",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "CloudWatchMetrics"
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricData",
+      "logs:PutLogEvents",
+      "logs:CreateLogStream",
+      "logs:DescribeLogStreams",
+      "logs:DescribeLogGroups",
     ]
     resources = ["*"]
   }

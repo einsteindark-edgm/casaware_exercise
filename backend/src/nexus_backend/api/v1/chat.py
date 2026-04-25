@@ -10,7 +10,13 @@ from nexus_backend.auth.dependencies import get_current_user
 from nexus_backend.auth.models import CognitoUser
 from nexus_backend.errors import NotAuthorized, ResourceNotFound
 from nexus_backend.observability.logging import bind_request_context
-from nexus_backend.schemas.chat import ChatStartRequest, ChatStartResponse
+from nexus_backend.observability.otel import inject_traceparent
+from nexus_backend.schemas.chat import (
+    ChatSessionHistory,
+    ChatStartRequest,
+    ChatStartResponse,
+    ChatTurn,
+)
 from nexus_backend.schemas.events import EventEnvelope
 from nexus_backend.services.mongodb import mongo
 from nexus_backend.services.sse_broker import sse_broker, workflow_channel
@@ -57,6 +63,12 @@ async def start_chat(
     workflow_id = f"rag-{session_id}-{turn}"
     bind_request_context(workflow_id=workflow_id)
 
+    propagation_carrier: dict[str, str] = {}
+    inject_traceparent(propagation_carrier)
+    propagation_headers: dict[str, bytes] = {
+        k: v.encode("utf-8") for k, v in propagation_carrier.items()
+    }
+
     await temporal_service.start_workflow(
         "RAGQueryWorkflow",
         args=[
@@ -70,6 +82,7 @@ async def start_chat(
         ],
         workflow_id=workflow_id,
         task_queue="nexus-rag-tq",
+        headers=propagation_headers,
     )
 
     return ChatStartResponse(session_id=session_id, workflow_id=workflow_id, turn=turn)
@@ -114,6 +127,49 @@ async def stream_chat(
 
     channel = workflow_channel(user.tenant_id, workflow_id)
     return EventSourceResponse(_stream(channel, request, last_event_id), ping=15)
+
+
+@router.get("/sessions/{session_id}", response_model=ChatSessionHistory)
+async def get_chat_session(
+    session_id: str,
+    user: CognitoUser = Depends(get_current_user),
+) -> ChatSessionHistory:
+    session = await mongo.db.chat_sessions.find_one({"session_id": session_id})
+    if session is None:
+        raise ResourceNotFound(f"chat session {session_id} not found")
+    if session.get("tenant_id") != user.tenant_id:
+        raise NotAuthorized("chat session belongs to a different tenant")
+
+    cursor = (
+        mongo.db.chat_turns.find(
+            {"session_id": session_id, "tenant_id": user.tenant_id},
+            {
+                "_id": 0,
+                "turn": 1,
+                "user_message": 1,
+                "assistant_message": 1,
+                "citations": 1,
+                "created_at": 1,
+            },
+        )
+        .sort("turn", 1)
+    )
+    rows = await cursor.to_list(length=200)
+    turns = [
+        ChatTurn(
+            turn=int(r.get("turn") or 0),
+            user_message=r.get("user_message") or "",
+            assistant_message=r.get("assistant_message") or "",
+            citations=r.get("citations") or [],
+            created_at=r.get("created_at"),
+        )
+        for r in rows
+    ]
+    return ChatSessionHistory(
+        session_id=session_id,
+        tenant_id=user.tenant_id,
+        turns=turns,
+    )
 
 
 __all__ = ["router"]

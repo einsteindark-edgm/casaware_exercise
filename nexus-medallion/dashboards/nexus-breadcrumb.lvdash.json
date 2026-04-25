@@ -1,0 +1,225 @@
+{
+  "datasets": [
+    {
+      "name": "trace_options",
+      "displayName": "Available trace IDs (24h)",
+      "queryLines": [
+        "SELECT\n  metadata.trace_id AS trace_id,\n  MIN(created_at)   AS first_seen,\n  MAX(created_at)   AS last_seen,\n  COUNT(*)          AS event_count,\n  ANY_VALUE(expense_id) AS expense_id\nFROM nexus_dev.silver.expense_events\nWHERE metadata.trace_id IS NOT NULL\n  AND created_at >= current_timestamp() - INTERVAL 24 HOURS\nGROUP BY metadata.trace_id\nORDER BY last_seen DESC\nLIMIT 200"
+      ]
+    },
+    {
+      "name": "breadcrumb",
+      "displayName": "Breadcrumb timeline (filtered by trace_id)",
+      "queryLines": [
+        "WITH events AS (\n  SELECT\n    expense_id,\n    event_type,\n    actor.type   AS actor_type,\n    actor.id     AS actor_id,\n    workflow_id,\n    metadata.trace_id AS trace_id,\n    created_at,\n    LAG(created_at) OVER (\n      PARTITION BY expense_id ORDER BY created_at\n    ) AS prev_at\n  FROM nexus_dev.silver.expense_events\n  WHERE metadata.trace_id = :trace_id\n)\nSELECT\n  created_at,\n  event_type,\n  actor_type,\n  actor_id,\n  workflow_id,\n  expense_id,\n  CASE\n    WHEN prev_at IS NULL THEN NULL\n    ELSE (UNIX_TIMESTAMP(created_at) - UNIX_TIMESTAMP(prev_at))\n  END AS stage_duration_sec\nFROM events\nORDER BY created_at ASC"
+      ],
+      "parameters": [
+        {
+          "keyword": "trace_id",
+          "displayName": "trace_id",
+          "dataType": "STRING"
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "page_breadcrumb",
+      "displayName": "Breadcrumb",
+      "layout": [
+        {
+          "widget": {
+            "name": "header_md",
+            "spec": {
+              "version": 1,
+              "widgetType": "markdown",
+              "encodings": {},
+              "frame": {
+                "showTitle": false
+              },
+              "markdown": "# Nexus Breadcrumb (audit timeline)\n\nPick a `trace_id` from the dropdown to see every step the request took across backend, worker, OCR, RAG and HITL. The `\u0394 vs prev (sec)` column shows how long each stage took. For the live (sub-minute) view, open CloudWatch ServiceLens."
+            },
+            "position": {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 2
+            }
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_trace_id",
+            "queries": [
+              {
+                "name": "param_q_trace_options",
+                "query": {
+                  "datasetName": "trace_options",
+                  "fields": [
+                    {
+                      "name": "trace_id",
+                      "expression": "`trace_id`"
+                    },
+                    {
+                      "name": "last_seen",
+                      "expression": "`last_seen`"
+                    },
+                    {
+                      "name": "expense_id",
+                      "expression": "`expense_id`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "trace_id",
+                    "queryName": "param_q_trace_options"
+                  },
+                  {
+                    "fieldName": "trace_id",
+                    "queryName": "param_q_trace_options"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Pick a trace_id"
+              }
+            },
+            "position": {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 2
+            }
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_breadcrumb_timeline",
+            "queries": [
+              {
+                "name": "main_query_breadcrumb",
+                "query": {
+                  "datasetName": "breadcrumb",
+                  "fields": [
+                    {
+                      "name": "created_at",
+                      "expression": "`created_at`"
+                    },
+                    {
+                      "name": "event_type",
+                      "expression": "`event_type`"
+                    },
+                    {
+                      "name": "actor_type",
+                      "expression": "`actor_type`"
+                    },
+                    {
+                      "name": "actor_id",
+                      "expression": "`actor_id`"
+                    },
+                    {
+                      "name": "workflow_id",
+                      "expression": "`workflow_id`"
+                    },
+                    {
+                      "name": "expense_id",
+                      "expression": "`expense_id`"
+                    },
+                    {
+                      "name": "stage_duration_sec",
+                      "expression": "`stage_duration_sec`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "type": "column",
+                    "fieldName": "created_at",
+                    "title": "Timestamp (UTC)",
+                    "order": 0,
+                    "type_": "datetime",
+                    "displayAs": "datetime"
+                  },
+                  {
+                    "type": "column",
+                    "fieldName": "event_type",
+                    "title": "Event",
+                    "order": 1,
+                    "type_": "string",
+                    "displayAs": "string"
+                  },
+                  {
+                    "type": "column",
+                    "fieldName": "actor_type",
+                    "title": "Actor type",
+                    "order": 2,
+                    "type_": "string",
+                    "displayAs": "string"
+                  },
+                  {
+                    "type": "column",
+                    "fieldName": "actor_id",
+                    "title": "Actor",
+                    "order": 3,
+                    "type_": "string",
+                    "displayAs": "string"
+                  },
+                  {
+                    "type": "column",
+                    "fieldName": "workflow_id",
+                    "title": "Workflow ID",
+                    "order": 4,
+                    "type_": "string",
+                    "displayAs": "string"
+                  },
+                  {
+                    "type": "column",
+                    "fieldName": "expense_id",
+                    "title": "Expense",
+                    "order": 5,
+                    "type_": "string",
+                    "displayAs": "string"
+                  },
+                  {
+                    "type": "column",
+                    "fieldName": "stage_duration_sec",
+                    "title": "\u0394 vs prev (sec)",
+                    "order": 6,
+                    "type_": "decimal",
+                    "displayAs": "number"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Breadcrumb timeline (event sequence + latency between stages)"
+              }
+            },
+            "position": {
+              "x": 0,
+              "y": 2,
+              "width": 12,
+              "height": 12
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

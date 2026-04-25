@@ -14,6 +14,7 @@ from nexus_backend.config import settings
 from nexus_backend.errors import ResourceNotFound, ValidationFailed
 from nexus_backend.observability.logging import bind_request_context, get_logger
 from nexus_backend.observability.metrics import workflow_starts
+from nexus_backend.observability.otel import current_trace_id_hex, inject_traceparent
 from nexus_backend.observability.xray import current_trace_header
 from nexus_backend.schemas.events import EventEnvelope
 from nexus_backend.schemas.expense import (
@@ -139,6 +140,11 @@ async def create_expense(
         }
     )
 
+    trace_id_hex = current_trace_id_hex()
+    event_metadata: dict[str, Any] = {}
+    if trace_id_hex:
+        event_metadata["trace_id"] = trace_id_hex
+
     await mongo.db.expense_events.insert_one(
         {
             "event_id": new_event_id(),
@@ -148,6 +154,7 @@ async def create_expense(
             "actor": {"type": "user", "id": user.sub},
             "details": {"user_reported": expense.model_dump(mode="json")},
             "workflow_id": workflow_id,
+            "metadata": event_metadata,
             "created_at": now,
         }
     )
@@ -156,6 +163,17 @@ async def create_expense(
     trace_header = current_trace_header()
     if trace_header:
         memo["x_amzn_trace_id"] = trace_header
+    if trace_id_hex:
+        memo["trace_id"] = trace_id_hex
+
+    # Phase E.2 — propagate W3C tracecontext + X-Ray header to the worker so the
+    # ExpenseAudit workflow + activities show up under the same trace as the HTTP
+    # request in ServiceLens.
+    propagation_carrier: dict[str, str] = {}
+    inject_traceparent(propagation_carrier)
+    propagation_headers: dict[str, bytes] = {
+        k: v.encode("utf-8") for k, v in propagation_carrier.items()
+    }
 
     await temporal_service.start_workflow(
         "ExpenseAuditWorkflow",
@@ -171,6 +189,7 @@ async def create_expense(
         workflow_id=workflow_id,
         task_queue="nexus-orchestrator-tq",
         memo=memo,
+        headers=propagation_headers,
     )
     workflow_starts.labels(
         workflow_type="ExpenseAuditWorkflow", tenant_id=user.tenant_id

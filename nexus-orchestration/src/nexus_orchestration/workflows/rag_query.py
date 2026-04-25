@@ -1,7 +1,8 @@
-"""RAGQueryWorkflow — minimal agentic loop using AWS Bedrock (or fake).
+"""RAGQueryWorkflow — hybrid agentic loop using AWS Bedrock (or fake).
 
 Runs in `nexus-rag-tq`. The workflow streams tokens via Redis, decides whether
-to call the `search_expenses` tool, and persists the turn in `chat_turns` so
+to call `search_expenses_semantic` (vector) or `search_expenses_structured`
+(SQL) — or both in the same turn — and persists the turn in `chat_turns` so
 subsequent turns can be context-aware.
 
 Input (from backend/src/nexus_backend/api/v1/chat.py):
@@ -9,6 +10,11 @@ Input (from backend/src/nexus_backend/api/v1/chat.py):
 
 Note: `previous_turns` is not in the input — we load it from Mongo because the
 backend only writes session metadata, not turn history.
+
+Security invariants:
+- tenant_filter ALWAYS comes from the workflow input, never from LLM args.
+- `max_iterations` caps runaway loops.
+- bedrock_converse RetryPolicy=1 while streaming (re-stream duplicates tokens).
 """
 from __future__ import annotations
 
@@ -19,7 +25,12 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from nexus_orchestration.tools.search_expenses import SEARCH_EXPENSES_TOOL
+    from nexus_orchestration.tools.search_expenses import (
+        SEARCH_EXPENSES_SEMANTIC_TOOL,
+    )
+    from nexus_orchestration.tools.search_expenses_structured import (
+        SEARCH_EXPENSES_STRUCTURED_TOOL,
+    )
 
 
 @workflow.defn(name="RAGQueryWorkflow")
@@ -37,7 +48,6 @@ class RAGQueryWorkflow:
         user_message = inp["message"]
         workflow_id = workflow.info().workflow_id
 
-        # 1) Load previous turns and the system prompt.
         system_prompt = await workflow.execute_activity(
             "load_rag_system_prompt",
             start_to_close_timeout=timedelta(seconds=5),
@@ -53,7 +63,9 @@ class RAGQueryWorkflow:
             {"role": "user", "content": [{"text": user_message}]}
         ]
 
+        tool_calls_log: list[dict[str, Any]] = []
         max_iterations = 5
+
         for _ in range(max_iterations):
             if self._cancelled:
                 self._state = "cancelled"
@@ -64,7 +76,10 @@ class RAGQueryWorkflow:
                 {
                     "system": system_prompt,
                     "messages": messages,
-                    "tools": [SEARCH_EXPENSES_TOOL],
+                    "tools": [
+                        SEARCH_EXPENSES_SEMANTIC_TOOL,
+                        SEARCH_EXPENSES_STRUCTURED_TOOL,
+                    ],
                     "stream_to_redis": True,
                     "tenant_id": tenant_id,
                     "user_id": user_id,
@@ -107,6 +122,7 @@ class RAGQueryWorkflow:
                             "session_id": session_id,
                             "citations": citations,
                             "final_text": final_text,
+                            "tool_calls": tool_calls_log,
                         },
                     },
                     start_to_close_timeout=timedelta(seconds=5),
@@ -116,42 +132,96 @@ class RAGQueryWorkflow:
                     "status": "completed",
                     "text": final_text,
                     "citations": citations,
+                    "tool_calls": tool_calls_log,
                 }
 
-            # Tool-use branch.
-            tool_results = []
+            # Tool-use branch. Each tool block may be dispatched independently.
+            # Bedrock Converse format: assistant blocks look like
+            # {"toolUse": {"toolUseId": ..., "name": ..., "input": {...}}}
+            # and we reply with a user message whose content is a list of
+            # {"toolResult": {"toolUseId": ..., "content": [{"json": {...}}]}}
+            tool_results: list[dict[str, Any]] = []
             for block in response["content"]:
-                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                if not isinstance(block, dict):
                     continue
-                if block["name"] == "search_expenses":
-                    search_result = await workflow.execute_activity(
+                tool_use = block.get("toolUse")
+                if not isinstance(tool_use, dict):
+                    continue
+
+                tool_name = tool_use.get("name")
+                tool_use_id = tool_use.get("toolUseId")
+                tool_input = tool_use.get("input") or {}
+
+                if tool_name == "search_expenses_semantic":
+                    result = await workflow.execute_activity(
                         "vector_similarity_search",
                         {
-                            "query": block["input"].get("query", ""),
-                            "k": int(block["input"].get("k", 5)),
+                            "query": tool_input.get("query", ""),
+                            "k": int(tool_input.get("k", 5)),
                             # CRITICAL: tenant_filter comes from the workflow
-                            # input, NOT from LLM-provided arguments.
+                            # input, NEVER from LLM-provided arguments.
                             "tenant_filter": tenant_id,
                         },
-                        start_to_close_timeout=timedelta(seconds=10),
+                        start_to_close_timeout=timedelta(seconds=15),
                         retry_policy=RetryPolicy(maximum_attempts=3),
+                    )
+                    tool_calls_log.append(
+                        {
+                            "tool": "search_expenses_semantic",
+                            "row_count": len(result) if isinstance(result, list) else 0,
+                        }
                     )
                     tool_results.append(
                         {
-                            "type": "tool_result",
-                            "tool_use_id": block["id"],
-                            "content": [{"json": search_result}],
+                            "toolResult": {
+                                "toolUseId": tool_use_id,
+                                "content": [{"json": result}],
+                            }
                         }
                     )
+
+                elif tool_name == "search_expenses_structured":
+                    result = await workflow.execute_activity(
+                        "search_expenses_structured",
+                        {**tool_input, "tenant_filter": tenant_id},
+                        start_to_close_timeout=timedelta(seconds=15),
+                        retry_policy=RetryPolicy(maximum_attempts=3),
+                    )
+                    tool_calls_log.append(
+                        {
+                            "tool": "search_expenses_structured",
+                            "row_count": (
+                                result.get("row_count_total", 0)
+                                if isinstance(result, dict)
+                                else 0
+                            ),
+                            "error": (
+                                result.get("error")
+                                if isinstance(result, dict)
+                                else None
+                            ),
+                        }
+                    )
+                    tool_results.append(
+                        {
+                            "toolResult": {
+                                "toolUseId": tool_use_id,
+                                "content": [{"json": result}],
+                            }
+                        }
+                    )
+
                 else:
                     tool_results.append(
                         {
-                            "type": "tool_result",
-                            "tool_use_id": block["id"],
-                            "content": [{"text": f"Tool {block['name']} not available"}],
-                            "status": "error",
+                            "toolResult": {
+                                "toolUseId": tool_use_id,
+                                "content": [{"text": f"Tool {tool_name} not available"}],
+                                "status": "error",
+                            }
                         }
                     )
+
             messages.append({"role": "user", "content": tool_results})
 
         # Exceeded max_iterations.
@@ -164,12 +234,13 @@ class RAGQueryWorkflow:
                 "payload": {
                     "session_id": session_id,
                     "error": "max_iterations_exceeded",
+                    "tool_calls": tool_calls_log,
                 },
             },
             start_to_close_timeout=timedelta(seconds=5),
         )
         self._state = "failed"
-        return {"status": "max_iterations_exceeded"}
+        return {"status": "max_iterations_exceeded", "tool_calls": tool_calls_log}
 
     @workflow.signal(name="cancel_chat")
     async def cancel_chat(self, payload: dict[str, Any]) -> None:
@@ -180,8 +251,61 @@ class RAGQueryWorkflow:
         return {"state": self._state, "current_step": self._state}
 
 
-def _extract_citations_from_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+# ── Citation extraction ─────────────────────────────────────────────────────
+
+def normalize_citation(raw: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize one row from either tool into the wire shape the frontend
+    consumes. Returns None if the row lacks an expense_id (nothing to cite).
+    """
+    eid = raw.get("expense_id")
+    if not eid:
+        return None
+    amount = raw.get("amount")
+    try:
+        amount = float(amount) if amount is not None else None
+    except (TypeError, ValueError):
+        amount = None
+    return {
+        "expense_id": eid,
+        "vendor": raw.get("vendor"),
+        "amount": amount,
+        "currency": raw.get("currency"),
+        "date": raw.get("date"),
+        "category": raw.get("category"),
+        "link": raw.get("link") or f"/expenses/{eid}",
+        "source": raw.get("_source") or raw.get("source") or "unknown",
+    }
+
+
+def _iter_tool_result_rows(tool_result: Any):
+    """Yield row dicts regardless of whether the tool returned a list (vector)
+    or a dict with a `rows` key (SQL) or an aggregate payload (SQL sum/count).
+    """
+    if isinstance(tool_result, list):
+        for r in tool_result:
+            if isinstance(r, dict):
+                yield r
+        return
+    if isinstance(tool_result, dict):
+        if tool_result.get("error"):
+            return
+        rows = tool_result.get("rows")
+        if isinstance(rows, list):
+            for r in rows:
+                if isinstance(r, dict):
+                    yield r
+
+
+def _extract_citations_from_history(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Walk the toolResult blocks in order; normalize + dedupe by expense_id,
+    preserving the first source seen. Cap at 10 citations.
+
+    Reads Bedrock-Converse-shaped blocks: {"toolResult": {"content": [...]}}.
+    """
     citations: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for msg in messages:
         if msg.get("role") != "user":
             continue
@@ -189,12 +313,28 @@ def _extract_citations_from_history(messages: list[dict[str, Any]]) -> list[dict
         if not isinstance(content, list):
             continue
         for block in content:
-            if not isinstance(block, dict) or block.get("type") != "tool_result":
+            if not isinstance(block, dict):
                 continue
-            for item in block.get("content", []):
-                if isinstance(item, dict) and isinstance(item.get("json"), list):
-                    citations.extend(item["json"])
-    return citations[:10]
+            tool_result = block.get("toolResult")
+            if not isinstance(tool_result, dict):
+                continue
+            for item in tool_result.get("content", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                payload = item.get("json")
+                if payload is None:
+                    continue
+                for raw in _iter_tool_result_rows(payload):
+                    cit = normalize_citation(raw)
+                    if cit is None:
+                        continue
+                    if cit["expense_id"] in seen:
+                        continue
+                    seen.add(cit["expense_id"])
+                    citations.append(cit)
+                    if len(citations) >= 10:
+                        return citations
+    return citations
 
 
 def _extract_final_text(content: list[dict[str, Any]]) -> str:

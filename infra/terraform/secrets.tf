@@ -132,3 +132,21 @@ resource "aws_ssm_parameter" "databricks_vs_index" {
   type  = "String"
   value = "${var.databricks_catalog_name}.vector.expense_chunks_index"
 }
+
+# Phase D: warehouse id needed by `search_expenses_structured` activity to
+# run parametrised SQL against gold.expense_audit. Stored as a secret because
+# anyone with the id + token can query the warehouse.
+resource "aws_secretsmanager_secret" "databricks_warehouse_id" {
+  name                    = "${var.prefix}/databricks_warehouse_id"
+  description             = "Databricks SQL warehouse id used by the RAG SQL tool."
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "databricks_warehouse_id_initial" {
+  secret_id     = aws_secretsmanager_secret.databricks_warehouse_id.id
+  secret_string = "REPLACE_ME_AFTER_PHASE_D"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}

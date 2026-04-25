@@ -28,6 +28,18 @@ def _inject_context(
         value = var.get()
         if value and key not in event_dict:
             event_dict[key] = value
+    # Phase E.2 — attach trace_id/span_id from current OTel span if present.
+    # Lets CloudWatch Logs Insights filter by trace_id alongside ServiceLens.
+    if "trace_id" not in event_dict:
+        try:
+            from opentelemetry import trace as _otel_trace
+
+            ctx = _otel_trace.get_current_span().get_span_context()
+            if ctx.is_valid:
+                event_dict["trace_id"] = format(ctx.trace_id, "032x")
+                event_dict["span_id"] = format(ctx.span_id, "016x")
+        except Exception:
+            pass
     return event_dict
 
 

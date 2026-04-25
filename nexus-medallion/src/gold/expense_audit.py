@@ -25,7 +25,7 @@
 
 # COMMAND ----------
 import dlt
-from pyspark.sql.functions import coalesce, col, max as spark_max
+from pyspark.sql.functions import coalesce, col, first, max as spark_max
 
 
 @dlt.table(
@@ -67,9 +67,20 @@ def expense_audit():
         )
     )
 
+    # Phase E.4 — pull breadcrumb trace_id from the timeline. Rows pre-Phase E
+    # have trace_id NULL, so we take the first non-null per expense (the
+    # creation event from FastAPI is the canonical source).
+    trace = (
+        spark.read.table(f"{catalog}.silver.expense_events")
+        .where("trace_id IS NOT NULL")
+        .groupBy("expense_id")
+        .agg(first("trace_id", ignorenulls=True).alias("trace_id"))
+    )
+
     return (
         expenses.join(ocr, on="expense_id", how="left")
         .join(hitl, on="expense_id", how="left")
+        .join(trace, on="expense_id", how="left")
         .select(
             col("tenant_id"),
             col("expense_id"),
@@ -89,5 +100,7 @@ def expense_audit():
             col("hitl_conflict_fields"),
             col("hitl_resolved_by"),
             col("hitl_resolved_at"),
+            # Breadcrumb correlation — link al X-Ray trace que originó el expense.
+            col("trace_id"),
         )
     )

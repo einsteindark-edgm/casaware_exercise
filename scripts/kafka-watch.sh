@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ────────────────────────────────────────────────────────────────────
-# Observa eventos de Kafka (MSK Serverless) sin abrir la red al público.
+# Observa eventos de Kafka (MSK Provisioned) sin abrir la red al público.
 #
 # Lanza una task Fargate one-shot en el VPC que corre kafka-console-consumer
 # con IAM SASL auth. Los mensajes van a CloudWatch, y el script te los tail-ea
@@ -21,7 +21,7 @@
 #         o el nombre completo si empieza con "nexus."
 #   --beginning  lee desde el primer mensaje del topic (default: latest)
 #   --duration=N segundos que vive la task (default: 300 = 5 min, max 3600)
-#   --bootstrap=HOST:PORT   override del bootstrap (default: serverless)
+#   --bootstrap=HOST:PORT   override del bootstrap (default: provisioned)
 #   --partitions=N           (solo create-topics, default: 3)
 #   --replication-factor=N   (solo create-topics, default: 2)
 #
@@ -35,7 +35,7 @@ set -euo pipefail
 CLUSTER="nexus-dev-edgm"
 PREFIX="nexus-dev-edgm"
 LOG_GROUP="/ecs/nexus-dev-edgm/debezium"
-BOOTSTRAP="boot-lddwjvb7.c2.kafka-serverless.us-east-1.amazonaws.com:9098"
+BOOTSTRAP="b-1.nexusdevedgmkafkaprov.ygf4z6.c23.kafka.us-east-1.amazonaws.com:9098,b-2.nexusdevedgmkafkaprov.ygf4z6.c23.kafka.us-east-1.amazonaws.com:9098"
 MSK_IAM_VERSION="2.3.5"
 
 # Defaults
@@ -79,8 +79,7 @@ for arg in "$@"; do
 done
 TOPIC_ARG="${TOPIC_ARG:-expenses}"
 
-# Override del bootstrap (útil para apuntar al MSK Provisioned durante
-# el cutover, antes de que el terraform output cambie).
+# Override del bootstrap (por si se quiere apuntar a otro cluster ad-hoc).
 if [ -n "$BOOTSTRAP_OVERRIDE" ]; then
   BOOTSTRAP="$BOOTSTRAP_OVERRIDE"
 fi

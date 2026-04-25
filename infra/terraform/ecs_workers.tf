@@ -44,24 +44,40 @@ resource "aws_ecs_task_definition" "worker" {
       { name = "REDIS_TLS", value = "false" },
       { name = "S3_RECEIPTS_BUCKET", value = aws_s3_bucket.receipts.bucket },
       { name = "S3_TEXTRACT_OUTPUT_BUCKET", value = aws_s3_bucket.textract_output.bucket },
-      # Global fallback. Cada provider tiene override granular debajo;
-      # pon "false" aqui el dia que los tres proveedores reales esten activos.
-      { name = "FAKE_PROVIDERS", value = "true" },
-      { name = "FAKE_HITL_MODE", value = "force" },
-      # Per-provider overrides. Flip a "false" conforme cada uno este listo.
-      { name = "FAKE_TEXTRACT", value = "false" },     # real (Phase D)
-      { name = "FAKE_BEDROCK", value = "true" },       # pendiente credenciales
-      { name = "FAKE_VECTOR_SEARCH", value = "true" }, # pendiente C.7 index poblado
+      # All real providers active. Flip individual FAKE_* to "true" only as
+      # an emergency fallback if one provider is unavailable.
+      { name = "FAKE_PROVIDERS", value = "false" },
+      { name = "FAKE_HITL_MODE", value = "auto" },
+      { name = "FAKE_TEXTRACT", value = "false" },
+      { name = "FAKE_BEDROCK", value = "false" },
+      { name = "FAKE_VECTOR_SEARCH", value = "false" },
+      { name = "FAKE_SQL_SEARCH", value = "false" },
       { name = "AUDIT_SOURCE", value = "mongo" },
       { name = "LOG_LEVEL", value = "INFO" },
       { name = "WORKER_MAX_CONCURRENT_ACTIVITIES", value = "20" },
       { name = "WORKER_MAX_CONCURRENT_WORKFLOW_TASKS", value = "50" },
       # boto3 usa el task role via IMDSv2; no hay AWS_ENDPOINT_URL (prod real).
       { name = "AWS_ENDPOINT_URL", value = "" },
-      # Databricks Vector Search (tomados de SSM plaintext params).
+      # Databricks Vector Search + SQL (tomados de SSM plaintext params).
       { name = "DATABRICKS_VS_ENDPOINT", value = aws_ssm_parameter.databricks_vs_endpoint.value },
       { name = "DATABRICKS_VS_INDEX", value = aws_ssm_parameter.databricks_vs_index.value },
       { name = "DATABRICKS_CATALOG", value = var.databricks_catalog_name },
+      # Bedrock model — Amazon Nova Pro via US cross-region inference profile.
+      # Nova requires no use-case form; idéntico shape de Converse a Claude.
+      { name = "BEDROCK_MODEL_ID", value = "us.amazon.nova-pro-v1:0" },
+      # Vector search backend: "local" (in-process cosine over precomputed
+      # embeddings) or "managed" (Mosaic AI VS managed index). Default local
+      # because managed Delta Sync auto-pipelines depend on workspace tier.
+      { name = "VECTOR_BACKEND", value = "local" },
+      # Phase E.3 — OpenTelemetry → ADOT sidecar → X-Ray
+      { name = "OTEL_ENABLED", value = "true" },
+      { name = "OTEL_EXPORTER_OTLP_ENDPOINT", value = "http://localhost:4317" },
+      { name = "OTEL_EXPORTER_OTLP_PROTOCOL", value = "grpc" },
+      { name = "OTEL_SERVICE_NAME", value = "nexus-worker" },
+      { name = "OTEL_RESOURCE_ATTRIBUTES", value = "service.namespace=nexus,deployment.environment=dev" },
+      { name = "OTEL_PROPAGATORS", value = "tracecontext,xray" },
+      { name = "OTEL_TRACES_SAMPLER", value = "parentbased_traceidratio" },
+      { name = "OTEL_TRACES_SAMPLER_ARG", value = "0.05" },
     ]
 
     secrets = [
@@ -70,6 +86,7 @@ resource "aws_ecs_task_definition" "worker" {
       { name = "TEMPORAL_HOST", valueFrom = aws_secretsmanager_secret.temporal_ngrok_url.arn },
       { name = "DATABRICKS_HOST", valueFrom = aws_secretsmanager_secret.databricks_host.arn },
       { name = "DATABRICKS_TOKEN", valueFrom = aws_secretsmanager_secret.databricks_token.arn },
+      { name = "DATABRICKS_WAREHOUSE_ID", valueFrom = aws_secretsmanager_secret.databricks_warehouse_id.arn },
     ]
 
     logConfiguration = {
@@ -80,6 +97,38 @@ resource "aws_ecs_task_definition" "worker" {
         "awslogs-stream-prefix" = "ecs"
       }
     }
+
+    dependsOn = [
+      { containerName = "adot-collector", condition = "START" }
+    ]
+    },
+    # Phase E.1 — ADOT sidecar (OTel → X-Ray + CloudWatch metrics)
+    {
+      name      = "adot-collector"
+      image     = "public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0"
+      essential = false
+      cpu       = 64
+      memory    = 128
+
+      command = ["--config=/etc/ecs/ecs-default-config.yaml"]
+
+      environment = [
+        { name = "AWS_REGION", value = var.aws_region },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.adot.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "worker"
+        }
+      }
+
+      portMappings = [
+        { containerPort = 4317, protocol = "tcp" },
+        { containerPort = 4318, protocol = "tcp" },
+      ]
   }])
 }
 

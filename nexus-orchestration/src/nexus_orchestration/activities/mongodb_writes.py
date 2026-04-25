@@ -14,6 +14,7 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from temporalio import activity
 
 from nexus_orchestration.config import settings
+from nexus_orchestration.observability.otel import current_trace_id_hex
 from nexus_orchestration.ulid_ids import new_event_id, new_hitl_id
 
 _client: AsyncIOMotorClient | None = None
@@ -101,6 +102,10 @@ async def update_expense_to_rejected(inp: dict[str, Any]) -> None:
 @activity.defn(name="emit_expense_event")
 async def emit_expense_event(inp: dict[str, Any]) -> None:
     """Append an entry to expense_events (the semantic timeline)."""
+    metadata: dict[str, Any] = dict(inp.get("metadata") or {})
+    trace_id = current_trace_id_hex()
+    if trace_id and "trace_id" not in metadata:
+        metadata["trace_id"] = trace_id
     await _db().expense_events.insert_one(
         {
             "event_id": new_event_id(),
@@ -110,6 +115,7 @@ async def emit_expense_event(inp: dict[str, Any]) -> None:
             "actor": inp.get("actor") or {"type": "system", "id": "worker"},
             "details": inp.get("details", {}),
             "workflow_id": activity.info().workflow_id,
+            "metadata": metadata,
             "created_at": _now(),
         }
     )

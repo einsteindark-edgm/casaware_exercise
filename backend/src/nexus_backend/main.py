@@ -25,6 +25,7 @@ from nexus_backend.observability.logging import (
     set_request_id,
 )
 from nexus_backend.observability.metrics import install_metrics
+from nexus_backend.observability.otel import install_otel
 from nexus_backend.observability.xray import install_xray
 from nexus_backend.services.mongodb import mongo
 from nexus_backend.services.redis_client import redis_pool
@@ -114,7 +115,8 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(RequestContextMiddleware)
 
-    # Order matters: xray before metrics so spans wrap metric reporting.
+    # Order matters: otel/xray before metrics so spans wrap metric reporting.
+    install_otel(app)
     install_xray(app)
     install_metrics(app)
 

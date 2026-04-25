@@ -33,6 +33,8 @@ from nexus_orchestration.activities.mongodb_writes import (
 )
 from nexus_orchestration.activities.query_expense import query_expense_for_validation
 from nexus_orchestration.activities.redis_events import publish_event
+from nexus_orchestration.activities.sql_search import search_expenses_structured
+from nexus_orchestration.activities.sync_vector import trigger_vector_sync
 from nexus_orchestration.activities.textract import (
     textract_analyze_document_queries,
     textract_analyze_expense,
@@ -40,6 +42,10 @@ from nexus_orchestration.activities.textract import (
 from nexus_orchestration.activities.vector_search import vector_similarity_search
 from nexus_orchestration.config import settings
 from nexus_orchestration.observability.logging import configure_logging, get_logger
+from nexus_orchestration.observability.otel import (
+    install_otel,
+    temporal_tracing_interceptor,
+)
 from nexus_orchestration.workflows.audit_validation import AuditValidationWorkflow
 from nexus_orchestration.workflows.expense_audit import ExpenseAuditWorkflow
 from nexus_orchestration.workflows.ocr_extraction import OCRExtractionWorkflow
@@ -59,6 +65,9 @@ _COMMON_ACTIVITIES = [
     update_expense_to_approved,
     update_expense_to_rejected,
     create_hitl_task,
+    # Best-effort hook called by ExpenseAuditWorkflow at the end of the happy
+    # path so newly approved expenses get embedded into Vector Search.
+    trigger_vector_sync,
 ]
 
 _OCR_ACTIVITIES = [
@@ -81,6 +90,7 @@ _RAG_ACTIVITIES = [
     load_rag_system_prompt,
     bedrock_converse,
     vector_similarity_search,
+    search_expenses_structured,
     save_chat_turn,
     load_chat_history,
     publish_event,
@@ -140,7 +150,23 @@ def _tls_config() -> TLSConfig | None:
 
 async def run_worker(task_queue: str) -> None:
     configure_logging(settings.log_level)
+    # Phase E.3 — bootstrap OpenTelemetry before client connect so the
+    # TemporalTracingInterceptor sees the global TracerProvider.
+    install_otel()
     workflows, activities = _registration_for(task_queue)
+
+    # Preflight: if any real provider is enabled, the corresponding creds
+    # must be present. Fail loudly at boot instead of at the first tool call.
+    problems = settings.validate_real_providers()
+    if problems and task_queue in ("nexus-rag-tq", "all"):
+        for p in problems:
+            log.error("worker.preflight_failed", problem=p)
+        raise SystemExit(
+            "Missing credentials for real providers:\n  - "
+            + "\n  - ".join(problems)
+            + "\n\nEither set the env vars, or set FAKE_PROVIDERS=true (or the "
+            "per-provider FAKE_* flags) to run on stubs."
+        )
 
     log.info(
         "worker.starting",
@@ -153,12 +179,19 @@ async def run_worker(task_queue: str) -> None:
         fake_textract=settings.use_fake_textract,
         fake_bedrock=settings.use_fake_bedrock,
         fake_vector_search=settings.use_fake_vector_search,
+        fake_sql_search=settings.use_fake_sql_search,
     )
+
+    interceptors: list = []
+    tracing_interceptor = temporal_tracing_interceptor()
+    if tracing_interceptor is not None:
+        interceptors.append(tracing_interceptor)
 
     client = await Client.connect(
         settings.temporal_host,
         namespace=settings.temporal_namespace,
         tls=_tls_config(),
+        interceptors=interceptors,
     )
 
     # When TASK_QUEUE=all we need one Worker per queue so child workflows find

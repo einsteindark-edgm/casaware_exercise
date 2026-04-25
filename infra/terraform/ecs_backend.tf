@@ -51,6 +51,15 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "LOG_LEVEL", value = "INFO" },
       { name = "XRAY_ENABLED", value = "false" },
       { name = "CORS_ORIGINS", value = jsonencode([local.public_base_url]) },
+      # Phase E.2 — OpenTelemetry → ADOT sidecar → X-Ray
+      { name = "OTEL_ENABLED", value = "true" },
+      { name = "OTEL_EXPORTER_OTLP_ENDPOINT", value = "http://localhost:4317" },
+      { name = "OTEL_EXPORTER_OTLP_PROTOCOL", value = "grpc" },
+      { name = "OTEL_SERVICE_NAME", value = "nexus-backend" },
+      { name = "OTEL_RESOURCE_ATTRIBUTES", value = "service.namespace=nexus,deployment.environment=dev" },
+      { name = "OTEL_PROPAGATORS", value = "tracecontext,xray" },
+      { name = "OTEL_TRACES_SAMPLER", value = "parentbased_traceidratio" },
+      { name = "OTEL_TRACES_SAMPLER_ARG", value = "0.05" },
     ]
 
     secrets = [
@@ -67,6 +76,38 @@ resource "aws_ecs_task_definition" "backend" {
         "awslogs-stream-prefix" = "ecs"
       }
     }
+
+    dependsOn = [
+      { containerName = "adot-collector", condition = "START" }
+    ]
+    },
+    # Phase E.1 — ADOT sidecar (OTel → X-Ray + CloudWatch metrics)
+    {
+      name      = "adot-collector"
+      image     = "public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0"
+      essential = false
+      cpu       = 64
+      memory    = 128
+
+      command = ["--config=/etc/ecs/ecs-default-config.yaml"]
+
+      environment = [
+        { name = "AWS_REGION", value = var.aws_region },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.adot.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "backend"
+        }
+      }
+
+      portMappings = [
+        { containerPort = 4317, protocol = "tcp" },
+        { containerPort = 4318, protocol = "tcp" },
+      ]
   }])
 }
 
