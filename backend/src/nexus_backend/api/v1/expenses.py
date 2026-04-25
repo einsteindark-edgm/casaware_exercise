@@ -14,7 +14,7 @@ from nexus_backend.config import settings
 from nexus_backend.errors import ResourceNotFound, ValidationFailed
 from nexus_backend.observability.logging import bind_request_context, get_logger
 from nexus_backend.observability.metrics import workflow_starts
-from nexus_backend.observability.otel import current_trace_id_hex, inject_traceparent
+from nexus_backend.observability.otel import current_trace_id_hex
 from nexus_backend.observability.xray import current_trace_header
 from nexus_backend.schemas.events import EventEnvelope
 from nexus_backend.schemas.expense import (
@@ -166,15 +166,8 @@ async def create_expense(
     if trace_id_hex:
         memo["trace_id"] = trace_id_hex
 
-    # Phase E.2 — propagate W3C tracecontext + X-Ray header to the worker so the
-    # ExpenseAudit workflow + activities show up under the same trace as the HTTP
-    # request in ServiceLens.
-    propagation_carrier: dict[str, str] = {}
-    inject_traceparent(propagation_carrier)
-    propagation_headers: dict[str, bytes] = {
-        k: v.encode("utf-8") for k, v in propagation_carrier.items()
-    }
-
+    # OTel propagation backend → worker is handled by TracingInterceptor
+    # registered in RealTemporalBackend.connect(). No manual header injection.
     await temporal_service.start_workflow(
         "ExpenseAuditWorkflow",
         args=[
@@ -189,7 +182,6 @@ async def create_expense(
         workflow_id=workflow_id,
         task_queue="nexus-orchestrator-tq",
         memo=memo,
-        headers=propagation_headers,
     )
     workflow_starts.labels(
         workflow_type="ExpenseAuditWorkflow", tenant_id=user.tenant_id

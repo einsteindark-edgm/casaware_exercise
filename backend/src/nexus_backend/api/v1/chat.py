@@ -10,7 +10,6 @@ from nexus_backend.auth.dependencies import get_current_user
 from nexus_backend.auth.models import CognitoUser
 from nexus_backend.errors import NotAuthorized, ResourceNotFound
 from nexus_backend.observability.logging import bind_request_context
-from nexus_backend.observability.otel import inject_traceparent
 from nexus_backend.schemas.chat import (
     ChatSessionHistory,
     ChatStartRequest,
@@ -63,12 +62,8 @@ async def start_chat(
     workflow_id = f"rag-{session_id}-{turn}"
     bind_request_context(workflow_id=workflow_id)
 
-    propagation_carrier: dict[str, str] = {}
-    inject_traceparent(propagation_carrier)
-    propagation_headers: dict[str, bytes] = {
-        k: v.encode("utf-8") for k, v in propagation_carrier.items()
-    }
-
+    # OTel propagation backend → worker is handled by TracingInterceptor
+    # registered in RealTemporalBackend.connect(). No manual header injection.
     await temporal_service.start_workflow(
         "RAGQueryWorkflow",
         args=[
@@ -82,7 +77,6 @@ async def start_chat(
         ],
         workflow_id=workflow_id,
         task_queue="nexus-rag-tq",
-        headers=propagation_headers,
     )
 
     return ChatStartResponse(session_id=session_id, workflow_id=workflow_id, turn=turn)

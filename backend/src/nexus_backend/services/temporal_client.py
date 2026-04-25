@@ -31,7 +31,6 @@ class TemporalBackend(ABC):
         workflow_id: str,
         task_queue: str,
         memo: dict[str, Any] | None = None,
-        headers: dict[str, bytes] | None = None,
     ) -> str: ...
 
     @abstractmethod
@@ -48,9 +47,22 @@ class RealTemporalBackend(TemporalBackend):
     async def connect(self) -> None:
         from temporalio.client import Client
 
+        # Phase E.3 — register the OTel TracingInterceptor so the FastAPI →
+        # Temporal hop carries traceparent + X-Ray headers automatically.
+        # The worker's main_worker.py registers the same interceptor on its
+        # client; together they keep the trace continuous in ServiceLens.
+        interceptors: list[Any] = []
+        try:
+            from temporalio.contrib.opentelemetry import TracingInterceptor
+
+            interceptors.append(TracingInterceptor())
+        except Exception as exc:  # pragma: no cover — OTel deps optional
+            log.warning("temporal.tracing_interceptor_unavailable", error=str(exc))
+
         self._client = await Client.connect(
             settings.temporal_host,
             namespace=settings.temporal_namespace,
+            interceptors=interceptors,
         )
 
     async def close(self) -> None:
@@ -74,40 +86,25 @@ class RealTemporalBackend(TemporalBackend):
         workflow_id: str,
         task_queue: str,
         memo: dict[str, Any] | None = None,
-        headers: dict[str, bytes] | None = None,
     ) -> str:
-        from temporalio.api.common.v1 import Payload
         from temporalio.common import WorkflowIDReusePolicy
         from temporalio.service import RPCError
 
         if self._client is None:
             raise TemporalUnavailable("temporal client not connected")
 
-        # Phase E.2 — encode propagation headers as Temporal Payloads so the
-        # worker's TracingInterceptor can extract traceparent on the receiving
-        # side. Encoding is plain JSON utf-8 ("json/plain") which matches
-        # opentelemetry-temporal-contrib expectations.
-        encoded_headers: dict[str, Any] = {}
-        if headers:
-            for key, raw in headers.items():
-                if isinstance(raw, str):
-                    raw = raw.encode("utf-8")
-                encoded_headers[key] = Payload(
-                    metadata={"encoding": b"json/plain"},
-                    data=raw,
-                )
-
+        # OTel context propagation is implicit: the TracingInterceptor wired
+        # in connect() reads the current OTel context and attaches it to the
+        # outbound StartWorkflowExecution command.
         try:
-            kwargs: dict[str, Any] = dict(
+            await self._client.start_workflow(
+                workflow_type,
                 args=args,
                 id=workflow_id,
                 task_queue=task_queue,
                 id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
                 memo=memo or {},
             )
-            if encoded_headers:
-                kwargs["headers"] = encoded_headers
-            await self._client.start_workflow(workflow_type, **kwargs)
         except RPCError as exc:
             raise TemporalUnavailable(f"start_workflow failed: {exc}") from exc
         return workflow_id
@@ -170,9 +167,9 @@ class _TemporalProxy(TemporalBackend):
     async def start_workflow(self, *args: Any, **kwargs: Any) -> str:
         if self._backend is None:
             raise TemporalUnavailable("temporal backend not initialised")
-        # Older fakes don't accept `headers`; drop it transparently so dev tests stay green.
-        if "headers" in kwargs and not _backend_accepts_headers(self._backend):
-            kwargs.pop("headers")
+        # Be tolerant of legacy callers still passing `headers=` from older
+        # branches: silently drop it (propagation is interceptor-driven now).
+        kwargs.pop("headers", None)
         return await self._backend.start_workflow(*args, **kwargs)
 
     async def signal(self, *args: Any, **kwargs: Any) -> None:
@@ -184,16 +181,6 @@ class _TemporalProxy(TemporalBackend):
         if self._backend is None:
             raise TemporalUnavailable("temporal backend not initialised")
         return await self._backend.query(*args, **kwargs)
-
-
-def _backend_accepts_headers(backend: TemporalBackend) -> bool:
-    import inspect
-
-    try:
-        sig = inspect.signature(backend.start_workflow)
-    except (TypeError, ValueError):
-        return True
-    return "headers" in sig.parameters
 
 
 temporal_service: TemporalBackend = _TemporalProxy()
