@@ -18,6 +18,7 @@ Security invariants:
 """
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -96,6 +97,15 @@ class RAGQueryWorkflow:
             if response.get("stop_reason") != "tool_use":
                 citations = _extract_citations_from_history(messages)
                 final_text = _extract_final_text(response["content"])
+                allowed_ids = _allowed_expense_ids(messages)
+                final_text, hallucinated = _strip_hallucinated_expense_links(
+                    final_text, allowed_ids
+                )
+                if hallucinated:
+                    workflow.logger.warning(
+                        "stripped hallucinated expense links",
+                        extra={"workflow_id": workflow_id, "ids": list(hallucinated)},
+                    )
 
                 await workflow.execute_activity(
                     "save_chat_turn",
@@ -353,3 +363,69 @@ def _extract_final_text(content: list[dict[str, Any]]) -> str:
         if isinstance(block, dict) and block.get("text"):
             return block["text"]
     return ""
+
+
+# ── Hallucination guard ─────────────────────────────────────────────────────
+
+# Matches any markdown link to /expenses/<id>. The id is captured so we can
+# verify it against the set of expense_ids actually returned by tools.
+_EXPENSE_LINK_RE = re.compile(
+    r"\[([^\]]*)\]\(\s*/expenses/([A-Za-z0-9_\-]+)\s*\)"
+)
+
+
+def _allowed_expense_ids(messages: list[dict[str, Any]]) -> set[str]:
+    """Set of expense_ids that actually appear in tool_result rows of this run.
+
+    These are the ONLY ids the assistant is allowed to cite. Anything else in
+    the final text is a hallucination and must be stripped before we publish
+    the message to the user.
+    """
+    allowed: set[str] = set()
+    for msg in messages:
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            tool_result = block.get("toolResult")
+            if not isinstance(tool_result, dict):
+                continue
+            for item in tool_result.get("content", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                payload = item.get("json")
+                if payload is None:
+                    continue
+                for raw in _iter_tool_result_rows(payload):
+                    eid = raw.get("expense_id")
+                    if isinstance(eid, str) and eid:
+                        allowed.add(eid)
+    return allowed
+
+
+def _strip_hallucinated_expense_links(
+    final_text: str, allowed_ids: set[str]
+) -> tuple[str, set[str]]:
+    """Remove any /expenses/<id> markdown link whose id isn't in allowed_ids.
+
+    Returns (sanitized_text, set_of_stripped_ids). The link text itself is
+    dropped along with the URL — keeping the text would still leave a dangling
+    reference to a fabricated receipt. We collapse runs of resulting blank
+    lines so the output stays tidy.
+    """
+    stripped: set[str] = set()
+
+    def _replace(match: re.Match[str]) -> str:
+        eid = match.group(2)
+        if eid in allowed_ids:
+            return match.group(0)
+        stripped.add(eid)
+        return ""
+
+    cleaned = _EXPENSE_LINK_RE.sub(_replace, final_text)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned, stripped
