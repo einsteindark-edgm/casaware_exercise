@@ -81,9 +81,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
     await mongo.connect()
     await redis_pool.connect()
     await temporal_service.connect()
-    # Resolve AWS task-role credentials once now so the first user request
-    # doesn't time out on the ECS metadata endpoint (169.254.170.2).
-    await s3_service.prime()
+    # Open the long-lived S3 client. Credentials (RefreshableCredentials)
+    # then auto-refresh in background, off the request hot path. See s3.py.
+    await s3_service.connect()
     try:
         await prime_jwks()
     except Exception as exc:
@@ -94,6 +94,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
         yield
     finally:
         log.info("shutdown.begin")
+        await s3_service.close()
         await temporal_service.close()
         await redis_pool.close()
         await mongo.close()

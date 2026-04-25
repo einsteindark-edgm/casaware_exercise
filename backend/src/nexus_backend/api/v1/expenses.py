@@ -316,9 +316,9 @@ async def get_expense_receipt(
     if not receipt:
         raise ResourceNotFound(f"receipt for expense {expense_id} not found")
 
-    async with s3_service._client() as s3:  # noqa: SLF001
-        obj = await s3.get_object(Bucket=receipt["s3_bucket"], Key=receipt["s3_key"])
-        data = await obj["Body"].read()
+    data = await s3_service.download_bytes(
+        bucket=receipt["s3_bucket"], key=receipt["s3_key"]
+    )
 
     async def body_iter():
         yield data

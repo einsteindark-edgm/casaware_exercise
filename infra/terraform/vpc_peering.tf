@@ -42,6 +42,13 @@ variable "vpc_peering_enabled" {
 }
 
 # ── VPC Peering Connection ────────────────────────────────────────────
+#
+# CRITICAL — DO NOT DELETE MANUALLY.
+# The bronze CDC pipeline (DLT classic, customer-managed VPC) relies on
+# this peering + the two return routes below to reach the MSK brokers.
+# Deleting the peering or either route silently breaks all 5 bronze
+# tables with a Kafka `Timed out waiting for a node assignment` error
+# (incident: 2026-04-25). Recovery: `terraform apply` from this state.
 
 resource "aws_vpc_peering_connection" "databricks_msk" {
   count       = var.vpc_peering_enabled ? 1 : 0
@@ -52,6 +59,10 @@ resource "aws_vpc_peering_connection" "databricks_msk" {
   tags = {
     Name = "${var.prefix}-databricks-msk"
     Side = "requester"
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -77,12 +88,22 @@ resource "aws_vpc_peering_connection_options" "databricks_msk_accepter" {
 }
 
 # ── Routes en MSK VPC: 10.227.0.0/16 → peer ──────────────────────────
+#
+# RETURN ROUTE — TCP handshake fails without this. Symptom when missing:
+# `kafkashaded.org.apache.kafka.common.errors.TimeoutException: Timed
+# out waiting for a node assignment. Call: describeTopics`. Debezium is
+# unaffected (same VPC as MSK) so producers keep writing to Kafka, but
+# DLT consumers in the workspace VPC silently break.
 
 resource "aws_route" "msk_to_databricks_private" {
   count                     = var.vpc_peering_enabled ? 1 : 0
   route_table_id            = aws_route_table.private.id
   destination_cidr_block    = var.workspace_vpc_cidr
   vpc_peering_connection_id = aws_vpc_peering_connection.databricks_msk[0].id
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # ── Routes en Databricks VPC: 10.0.0.0/16 → peer ──────────────────────
@@ -94,6 +115,10 @@ resource "aws_route" "databricks_to_msk" {
   route_table_id            = var.workspace_route_table_id
   destination_cidr_block    = aws_vpc.main.cidr_block # 10.0.0.0/16
   vpc_peering_connection_id = aws_vpc_peering_connection.databricks_msk[0].id
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # ── MSK SG: ingress 9098 desde 10.227.0.0/16 ─────────────────────────
