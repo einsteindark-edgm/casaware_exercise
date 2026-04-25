@@ -21,7 +21,11 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": []
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
             }
           }
         }
@@ -45,7 +49,11 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": []
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
             }
           }
         }
@@ -70,7 +78,11 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": []
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
             }
           }
         }
@@ -96,7 +108,11 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": []
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
             }
           }
         }
@@ -119,7 +135,11 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": []
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
             }
           }
         }
@@ -142,7 +162,11 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": []
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
             }
           }
         }
@@ -166,7 +190,11 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": []
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
             }
           }
         }
@@ -189,7 +217,11 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": []
+              "values": [
+                {
+                  "value": ""
+                }
+              ]
             }
           }
         }
@@ -396,7 +428,11 @@
                 "defaultSelection": {
                   "values": {
                     "dataType": "STRING",
-                    "values": []
+                    "values": [
+                      {
+                        "value": ""
+                      }
+                    ]
                   }
                 }
               },
@@ -690,13 +726,7 @@
                       "expression": "`rows`"
                     }
                   ],
-                  "disaggregated": true,
-                  "parameters": [
-                    {
-                      "name": "p_expense_id",
-                      "keyword": "p_expense_id"
-                    }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -802,13 +832,7 @@
                       "expression": "`workflow_id`"
                     }
                   ],
-                  "disaggregated": true,
-                  "parameters": [
-                    {
-                      "name": "p_expense_id",
-                      "keyword": "p_expense_id"
-                    }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -1184,7 +1208,7 @@
                 ]
               },
               "frame": {
-                "title": "Silver — current state",
+                "title": "Silver \u2014 current state",
                 "showTitle": true
               }
             }
@@ -1242,13 +1266,7 @@
                       "expression": "`extracted_at`"
                     }
                   ],
-                  "disaggregated": true,
-                  "parameters": [
-                    {
-                      "name": "p_expense_id",
-                      "keyword": "p_expense_id"
-                    }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -1566,13 +1584,7 @@
                       "expression": "`workflow_id`"
                     }
                   ],
-                  "disaggregated": true,
-                  "parameters": [
-                    {
-                      "name": "p_expense_id",
-                      "keyword": "p_expense_id"
-                    }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -1823,13 +1835,7 @@
                       "expression": "`event_id`"
                     }
                   ],
-                  "disaggregated": true,
-                  "parameters": [
-                    {
-                      "name": "p_expense_id",
-                      "keyword": "p_expense_id"
-                    }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -2037,13 +2043,7 @@
                       "expression": "`approved_at`"
                     }
                   ],
-                  "disaggregated": true,
-                  "parameters": [
-                    {
-                      "name": "p_expense_id",
-                      "keyword": "p_expense_id"
-                    }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -2280,7 +2280,7 @@
                 ]
               },
               "frame": {
-                "title": "Gold — expense_audit",
+                "title": "Gold \u2014 expense_audit",
                 "showTitle": true
               }
             }
@@ -2334,13 +2334,7 @@
                       "expression": "`_cdc_ingestion_ts`"
                     }
                   ],
-                  "disaggregated": true,
-                  "parameters": [
-                    {
-                      "name": "p_expense_id",
-                      "keyword": "p_expense_id"
-                    }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -2620,13 +2614,7 @@
                       "expression": "`uploaded_at`"
                     }
                   ],
-                  "disaggregated": true,
-                  "parameters": [
-                    {
-                      "name": "p_expense_id",
-                      "keyword": "p_expense_id"
-                    }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
