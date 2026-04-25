@@ -12,6 +12,7 @@
 # COMMAND ----------
 import dlt
 from pyspark.sql.functions import col, concat, concat_ws, lit
+from pyspark.sql.types import ArrayType, FloatType
 
 
 @dlt.table(
@@ -50,5 +51,9 @@ def expense_chunks():
             col("final_date").cast("string").alias("date"),
             col("category"),
             col("approved_at"),
+            # `embedding` se popula por la activity Temporal `trigger_vector_sync`
+            # tras el approve. DLT inicializa NULL para alinear con la tabla
+            # existente (tiene la columna por un backfill manual previo).
+            lit(None).cast(ArrayType(FloatType())).alias("embedding"),
         )
     )

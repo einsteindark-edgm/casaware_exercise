@@ -11,6 +11,11 @@ resources:
       libraries:
         - notebook:
             path: ../../src/gold/expense_audit.py
+        # expense_chunks: chunks indexables por RAG. Lee de expense_audit.
+        # CRITICAL — sin esta línea los nuevos expenses no llegan a la tabla
+        # (incidente 2026-04-25: solo había 2 chunks de un backfill manual).
+        - notebook:
+            path: ../../src/gold/expense_chunks.py
 
       configuration:
         nexus.catalog: ${var.catalog}

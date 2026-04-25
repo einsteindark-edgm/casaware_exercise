@@ -193,13 +193,13 @@ class ExpenseAuditWorkflow:
         )
 
         # 5) Best-effort: trigger Vector Search sync so the new gold row gets
-        # embedded for the chat agent. We don't await CDC → DLT → embedding
-        # here (it's seconds–minutes downstream); we just kick the index sync
-        # so it doesn't sit cold. Failures are swallowed by the activity.
+        # embedded for the chat agent. The activity polls gold.expense_chunks
+        # until the DLT pipeline materializes (~10 min cadence). Failures are
+        # swallowed by the activity.
         await workflow.execute_activity(
             "trigger_vector_sync",
             {"expense_id": expense_id, "tenant_id": tenant_id},
-            start_to_close_timeout=timedelta(seconds=30),
+            start_to_close_timeout=timedelta(minutes=22),
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
 

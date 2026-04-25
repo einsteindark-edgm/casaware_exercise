@@ -13,6 +13,32 @@ resource "aws_cloudwatch_dashboard" "breadcrumb" {
   dashboard_name = "${var.prefix}-breadcrumb-live"
 
   dashboard_body = jsonencode({
+    # Phase E.5b — variables de dashboard. CloudWatch reemplaza el `pattern`
+    # por el valor del input en VIVO en todas las queries. Cambiar el valor
+    # del input en la cabecera del dashboard re-ejecuta los widgets que
+    # contengan ese pattern. Por defecto deja un valor "no-match" para que
+    # los widgets no devuelvan filas hasta que el usuario pegue un id real.
+    variables = [
+      {
+        type         = "pattern"
+        pattern      = "PASTE-TRACE-ID-HERE"
+        inputType    = "input"
+        id           = "trace_id"
+        label        = "trace_id"
+        defaultValue = "__pick_a_trace_id__"
+        visible      = true
+      },
+      {
+        type         = "pattern"
+        pattern      = "PASTE-REQUEST-ID-HERE"
+        inputType    = "input"
+        id           = "request_id"
+        label        = "request_id"
+        defaultValue = "__pick_a_request_id__"
+        visible      = true
+      },
+    ]
+
     widgets = [
       {
         type   = "text"
@@ -21,7 +47,7 @@ resource "aws_cloudwatch_dashboard" "breadcrumb" {
         width  = 24
         height = 2
         properties = {
-          markdown = "# Nexus Breadcrumb (Live)\n\nTrazas síncronas de cada petición — del frontend al worker, con latencia y errores. Para el timeline largo (HITL, días) ir al dashboard Databricks `Expense Breadcrumb`.\n\n**Buscar por trace_id**: pega el ID en los widgets de Logs Insights. **Service Map**: [Abrir ServiceLens](https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#servicelens:map)."
+          markdown = "# Nexus Breadcrumb (Live)\n\nTrazas síncronas de cada petición — del frontend al worker, con latencia y errores. Para el timeline largo (HITL, días) ir al dashboard Databricks `Expense Breadcrumb`.\n\n**Cómo usar**: pega un `trace_id` o `request_id` en los inputs de la barra superior — los widgets se filtran automáticamente. Encuentra `trace_id`s en el widget _Top trazas_ o en [X-Ray Traces](https://${var.aws_region}.console.aws.amazon.com/xray/home?region=${var.aws_region}#/traces). **Service Map**: [Abrir ServiceLens](https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#servicelens:map)."
         }
       },
       {

@@ -109,9 +109,15 @@ def _managed_sync(expense_id: str | None, tenant_id: str | None) -> dict[str, An
 def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, Any]:
     """Embed the chunk_text for the given expense_id and UPDATE the column.
 
-    Idempotent: if the row already has a non-null embedding, we recompute it
-    so an HITL re-resolve picks up the new chunk_text.
+    Polls gold.expense_chunks for up to ~18 minutes because the gold DLT
+    pipeline runs every 10 min — the row may not have arrived by the time
+    the workflow approves the expense (typically 6s after). 18 min covers
+    two pipeline windows worst-case.
+    Idempotent: recomputes embedding if it already exists, so an HITL
+    re-resolve picks up the new chunk_text.
     """
+    import time as _time
+
     if not (expense_id and tenant_id):
         return {"status": "skipped_missing_keys"}
 
@@ -130,24 +136,28 @@ def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, 
         access_token=token,
     ) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT chunk_id, chunk_text
-                FROM {catalog}.gold.expense_chunks
-                WHERE expense_id = %(expense_id)s AND tenant_id = %(tenant_id)s
-                """,
-                {"expense_id": expense_id, "tenant_id": tenant_id},
-            )
-            row = cur.fetchone()
+            row = None
+            for attempt in range(18):
+                cur.execute(
+                    f"""
+                    SELECT chunk_id, chunk_text
+                    FROM {catalog}.gold.expense_chunks
+                    WHERE expense_id = %(expense_id)s AND tenant_id = %(tenant_id)s
+                    """,
+                    {"expense_id": expense_id, "tenant_id": tenant_id},
+                )
+                row = cur.fetchone()
+                if row:
+                    break
+                _time.sleep(60)
             if not row:
-                # Gold may not have CDC'd the new row yet. The next chat query
-                # will fall back to on-the-fly embed for any NULL row.
-                log.info(
-                    "vector_sync.row_not_in_gold_yet",
+                log.warning(
+                    "vector_sync.row_not_in_gold_after_polling",
                     expense_id=expense_id,
                     tenant_id=tenant_id,
+                    attempts=18,
                 )
-                return {"status": "skipped_not_in_gold"}
+                return {"status": "timed_out_not_in_gold"}
 
             chunk_id, chunk_text = row[0], row[1] or ""
             embedding = _embed([chunk_text])[0]
