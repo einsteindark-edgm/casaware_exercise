@@ -21,11 +21,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -49,11 +45,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -78,11 +70,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -108,11 +96,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -135,11 +119,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -162,11 +142,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -190,11 +166,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -217,11 +189,7 @@
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
-              "values": [
-                {
-                  "value": ""
-                }
-              ]
+              "values": []
             }
           }
         }
@@ -376,7 +344,7 @@
                       "expression": "COUNT_IF(`associative_filter_predicate_group`)"
                     }
                   ],
-                  "disaggregated": true
+                  "disaggregated": false
                 }
               }
             ],
@@ -1176,7 +1144,7 @@
                 ]
               },
               "frame": {
-                "title": "Silver — current state",
+                "title": "Silver \u2014 current state",
                 "showTitle": true
               }
             }
@@ -2248,7 +2216,7 @@
                 ]
               },
               "frame": {
-                "title": "Gold — expense_audit",
+                "title": "Gold \u2014 expense_audit",
                 "showTitle": true
               }
             }

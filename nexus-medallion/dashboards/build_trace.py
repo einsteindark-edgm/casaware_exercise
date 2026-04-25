@@ -1,6 +1,6 @@
 """Regenerate nexus-expense-trace.lvdash.json.
 
-Two bugs to avoid (both cost an iteration to learn):
+Five bugs to avoid (each cost an iteration to learn):
 
 1. Data widgets must NOT repeat the `parameters` binding in their query.
    Only the *dataset* declaration and the *filter widget's* queries carry
@@ -18,6 +18,30 @@ Two bugs to avoid (both cost an iteration to learn):
        type=string   displayAs=string    (text)
        type=decimal  displayAs=number    (int/float)
        type=datetime displayAs=datetime  (dates & timestamps)
+
+3. The filter-single-select widget's `encodings.fields` must contain
+   exactly ONE entry with `parameterName` and ONE with `fieldName` —
+   not one parameterName per dataset. Multiple parameterName entries
+   for the same parameter confuse Lakeview and the click on the
+   dropdown won't propagate. The 8 `param_q_*` queries still live in
+   the widget's `queries` array (the parameter system re-runs them on
+   value change), but only one is referenced in encodings.
+
+4. Each widget's main query MUST have a unique `name` across the
+   dashboard. Using "main_query" for all 9 data widgets generates
+   duplicate HTML form ids (browser DevTools warns: "Duplicate form
+   field id in the same form, 10 resources"). The form HTML loses
+   tracking of the filter widget's selection — clicks on the dropdown
+   register internally but get cleared on the next render because the
+   filter sees collateral state from a colliding widget. Use
+   `main_query_<widget_name>` (or any unique string).
+
+5. The filter widget's `defaultSelection.values.values` MUST be an
+   empty array `[]`, not `[{"value": ""}]`. The non-empty array with
+   an empty-string element makes Lakeview think "the user has already
+   picked the empty string", so it re-applies that default on each
+   render and the user's actual click bounces off. Apply the same to
+   each parameterized dataset's `parameters[0].defaultSelection`.
 """
 from __future__ import annotations
 
@@ -27,6 +51,7 @@ from pathlib import Path
 OUT = Path(__file__).parent / "nexus-expense-trace.lvdash.json"
 
 PARAM_NAME = "p_expense_id"
+# Bug 5: defaultSelection.values.values must be `[]`, not `[{"value": ""}]`.
 PARAM_DECL = [
     {
         "displayName": "expense_id",
@@ -35,7 +60,7 @@ PARAM_DECL = [
         "defaultSelection": {
             "values": {
                 "dataType": "STRING",
-                "values": [{"value": ""}],
+                "values": [],
             }
         },
     }
@@ -128,7 +153,12 @@ def table_widget(name, title, dataset_name, columns, x, y, w, h):
             "name": name,
             "queries": [
                 {
-                    "name": "main_query",
+                    # Bug 4: query name MUST be unique across widgets.
+                    # If 2+ widgets share "main_query" the rendered form
+                    # inputs collide on id (browser warns "Duplicate form
+                    # field id"), and the single-select filter loses its
+                    # selection on re-render. Use widget-suffixed name.
+                    "name": f"main_query_{name}",
                     "query": widget_query(
                         dataset_name, [c["fieldName"] for c in columns]
                     ),
@@ -165,7 +195,7 @@ def bar_widget(name, title, dataset_name, x_field, y_field, x, y, w, h,
             "name": name,
             "queries": [
                 {
-                    "name": "main_query",
+                    "name": f"main_query_{name}",  # see Bug 4 in table_widget
                     "query": widget_query(dataset_name, [x_field, y_field]),
                 }
             ],
@@ -313,20 +343,25 @@ filter_widget = {
             "version": 2,
             "widgetType": "filter-single-select",
             "encodings": {
+                # Bug 3: only ONE parameterName entry (referencing any of the
+                # param_q_* queries — the parameter system propagates to all
+                # datasets with parameters block). Multiple parameterName for
+                # the same parameter confuses Lakeview and click stops
+                # propagating.
                 "fields": [
-                    {"parameterName": PARAM_NAME, "queryName": q["name"]}
-                    for q in filter_param_queries
-                ] + [
-                    {
-                        "fieldName": "expense_id",
-                        "displayName": "expense_id",
-                        "queryName": "options_q_d_all_ids",
-                    }
+                    {"parameterName": PARAM_NAME,
+                     "queryName": filter_param_queries[0]["name"]},
+                    {"fieldName": "expense_id",
+                     "displayName": "expense_id",
+                     "queryName": "options_q_d_all_ids"},
                 ]
             },
+            # Bug 5: empty array means "no default selection" — required so
+            # the user's click sticks. With [{"value": ""}] Lakeview re-applies
+            # the empty-string default on each render and selection bounces.
             "selection": {
                 "defaultSelection": {
-                    "values": {"dataType": "STRING", "values": [{"value": ""}]}
+                    "values": {"dataType": "STRING", "values": []}
                 }
             },
             "frame": {"title": "Select an expense_id", "showTitle": True},
