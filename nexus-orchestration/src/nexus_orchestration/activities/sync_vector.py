@@ -155,6 +155,10 @@ def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, 
 
             row = None
             for attempt in range(18):
+                # Heartbeat keeps the Temporal UI showing progress while we
+                # poll a slow upstream (DLT gold MV ~10 min cadence). Without
+                # this the activity looks frozen for up to 18 minutes.
+                activity.heartbeat({"attempt": attempt, "phase": "polling_gold_chunks"})
                 cur.execute(
                     f"""
                     SELECT chunk_id, chunk_text
@@ -177,7 +181,9 @@ def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, 
                 return {"status": "timed_out_not_in_gold"}
 
             chunk_id, chunk_text = row[0], row[1] or ""
+            activity.heartbeat({"phase": "embedding"})
             embedding = _embed([chunk_text])[0]
+            activity.heartbeat({"phase": "merging"})
 
             # Spark's array<float> bind is hairy from databricks-sql-connector;
             # format the literal inline. Values come from the embedding

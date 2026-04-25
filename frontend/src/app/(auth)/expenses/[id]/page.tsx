@@ -7,9 +7,9 @@ import { apiClient } from "@/lib/api/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, Clock, AlertTriangle, XCircle, FileSearch, ArrowRight } from "lucide-react";
+import { CheckCircle2, Clock, AlertTriangle, XCircle, FileSearch, ArrowRight, Database, BrainCircuit } from "lucide-react";
 
-type TimelineState = "received" | "processing" | "ocr" | "hitl" | "completed" | "failed";
+type TimelineState = "received" | "processing" | "ocr" | "hitl" | "finalizing" | "vectorizing" | "completed" | "failed";
 
 interface ExpenseRead {
   expense_id: string;
@@ -86,9 +86,12 @@ function stateFromExpense(status: ExpenseRead["status"]): TimelineState {
 function stateFromWorkflowStep(step: string | null | undefined): TimelineState | null {
   if (!step) return null;
   if (step === "started") return "processing";
-  if (step === "ocr") return "ocr";
-  if (step === "hitl_required") return "hitl";
+  if (step === "ocr" || step === "ocr_extraction") return "ocr";
+  if (step === "audit_validation") return "processing";
+  if (step === "hitl_required" || step === "waiting_human") return "hitl";
   if (step === "hitl_resolved") return "processing";
+  if (step === "finalizing" || step === "finalizing_in_mongo") return "finalizing";
+  if (step === "vectorizing") return "vectorizing";
   if (step === "completed") return "completed";
   if (step === "hitl_timeout" || step === "cancelled") return "failed";
   return null;
@@ -99,8 +102,10 @@ const STATE_RANK: Record<TimelineState, number> = {
   processing: 1,
   ocr: 2,
   hitl: 3,
-  completed: 4,
-  failed: 5,
+  finalizing: 4,
+  vectorizing: 5,
+  completed: 6,
+  failed: 7,
 };
 
 function maxState(a: TimelineState, b: TimelineState): TimelineState {
@@ -220,6 +225,13 @@ export default function ExpenseDetailPage() {
         case "workflow.started":
           next = next ? maxState(next, "processing") : "processing";
           break;
+        case "workflow.step_changed": {
+          const stepPayload = event.payload as Record<string, unknown>;
+          const step = stepPayload.step as string | undefined;
+          const mapped = stateFromWorkflowStep(step);
+          if (mapped) next = next ? maxState(next, mapped) : mapped;
+          break;
+        }
         case "workflow.ocr_progress":
           next = next ? maxState(next, "ocr") : "ocr";
           shouldRefreshHistory = true;
@@ -273,6 +285,8 @@ export default function ExpenseDetailPage() {
     { id: "received", title: "Received", icon: Clock },
     { id: "ocr", title: "Extracting text (Textract)", icon: FileSearch },
     { id: "hitl", title: "Waiting for your review", icon: AlertTriangle, isWarning: true },
+    { id: "finalizing", title: "Saving final data", icon: Database },
+    { id: "vectorizing", title: "Teaching the chatbot about your receipt...", icon: BrainCircuit },
     { id: "completed", title: "Audit completed", icon: CheckCircle2, isSuccess: true },
     { id: "failed", title: "Processing error", icon: XCircle, isError: true }
   ];
@@ -281,8 +295,10 @@ export default function ExpenseDetailPage() {
   if (currentState === "processing") activeStepIndex = 1;
   else if (currentState === "ocr") activeStepIndex = 1;
   else if (currentState === "hitl") activeStepIndex = 2;
-  else if (currentState === "completed") activeStepIndex = 3;
-  else if (currentState === "failed") activeStepIndex = 4;
+  else if (currentState === "finalizing") activeStepIndex = 3;
+  else if (currentState === "vectorizing") activeStepIndex = 4;
+  else if (currentState === "completed") activeStepIndex = 5;
+  else if (currentState === "failed") activeStepIndex = 6;
 
   const isCompleted = currentState === "completed";
 

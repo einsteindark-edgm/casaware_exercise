@@ -38,6 +38,23 @@ class ExpenseAuditWorkflow:
         tenant_id = inp["tenant_id"]
         user_id = inp["user_id"]
 
+        async def _emit_step(step: str) -> None:
+            # Best-effort SSE breadcrumb; failures must not break the audit.
+            await workflow.execute_activity(
+                "publish_event",
+                {
+                    "event_type": "workflow.step_changed",
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "expense_id": expense_id,
+                    "payload": {"step": step},
+                },
+                start_to_close_timeout=timedelta(seconds=5),
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            )
+
+        await _emit_step("processing")
+
         # Mark expense as processing (backend left it pending).
         await workflow.execute_activity(
             "update_expense_status",
@@ -50,6 +67,7 @@ class ExpenseAuditWorkflow:
         # settings.s3_receipts_bucket when not provided, so we don't have to
         # read `settings` from the workflow (determinism).
         self._current_step = "ocr_extraction"
+        await _emit_step("ocr_extraction")
         ocr_result = await workflow.execute_child_workflow(
             OCRExtractionWorkflow.run,
             {
@@ -70,6 +88,7 @@ class ExpenseAuditWorkflow:
 
         # 2) Child: audit validation.
         self._current_step = "audit_validation"
+        await _emit_step("audit_validation")
         audit_result = await workflow.execute_child_workflow(
             AuditValidationWorkflow.run,
             {
@@ -161,6 +180,7 @@ class ExpenseAuditWorkflow:
 
         # 3) Finalise in Mongo.
         self._current_step = "finalizing_in_mongo"
+        await _emit_step("finalizing")
         await workflow.execute_activity(
             "update_expense_to_approved",
             {
@@ -196,6 +216,8 @@ class ExpenseAuditWorkflow:
         # embedded for the chat agent. The activity polls gold.expense_chunks
         # until the DLT pipeline materializes (~10 min cadence). Failures are
         # swallowed by the activity.
+        self._current_step = "vectorizing"
+        await _emit_step("vectorizing")
         await workflow.execute_activity(
             "trigger_vector_sync",
             {"expense_id": expense_id, "tenant_id": tenant_id},

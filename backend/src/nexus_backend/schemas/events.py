@@ -9,6 +9,7 @@ from nexus_backend.ulid_ids import epoch_ms_now, new_event_id, ulid_to_epoch_ms
 
 EventType = Literal[
     "workflow.started",
+    "workflow.step_changed",
     "workflow.ocr_progress",
     "workflow.hitl_required",
     "workflow.hitl_resolved",

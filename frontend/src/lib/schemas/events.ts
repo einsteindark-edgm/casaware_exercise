@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const EventTypeSchema = z.enum([
   "workflow.started",
+  "workflow.step_changed",
   "workflow.ocr_progress",
   "workflow.hitl_required",
   "workflow.hitl_resolved",

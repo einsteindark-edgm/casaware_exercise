@@ -64,6 +64,7 @@ def test_event_types_superset_of_worker():
 
     # Worker emits these (see workflows + redis_events).
     worker_emits = {
+        "workflow.step_changed",
         "workflow.ocr_progress",
         "workflow.hitl_required",
         "workflow.completed",
