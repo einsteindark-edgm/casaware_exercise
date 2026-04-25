@@ -22,9 +22,10 @@ resources:
             min_workers: 1
             max_workers: 2
             mode: ENHANCED
-          # DBR ≥16.1 requerido para que UC Service Credential firme SASL
-          # IAM auth (sin necesidad de instance profile). 16.4 LTS estable.
-          spark_version: "16.4.x-scala2.12"
+          # NOTA: en Lakeflow Declarative Pipelines la versión del runtime la
+          # gestiona DLT (campo `channel` a nivel de pipeline si quieres
+          # forzar PREVIEW|CURRENT). `spark_version` aquí es ignorado y el
+          # bundle CLI lo marca como "unknown field".
 
       libraries:
         - notebook:
@@ -48,6 +49,8 @@ resources:
         # classic no tiene instance profile (correcto: queremos auth
         # por UC, no por instance profile).
         nexus.msk_service_credential: ${var.msk_service_credential}
-
-      credentials:
-        - name: ${var.msk_service_credential}
+        # El UC Service Credential se referencia por NOMBRE desde el código
+        # (ver `cdc_*.py`). No hay un campo `credentials` a nivel de pipeline
+        # en el bundle schema — se ataba aquí antes y el CLI lo marcaba como
+        # "unknown field". Lo quitamos; la credential sigue funcionando porque
+        # el notebook pasa el name vía `.option("databricks.serviceCredential", ...)`.
