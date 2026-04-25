@@ -3,11 +3,61 @@
 # `prevent_destroy` in vpc_peering.tf only blocks Terraform from deleting
 # these resources. It does NOT stop someone from removing them via the
 # AWS console / CLI / SDK — which is exactly how the 2026-04-25 incident
-# happened. This file wires CloudTrail → EventBridge → CloudWatch Logs
-# so any DeleteRoute / DeleteVpcPeeringConnection call against the
-# critical resources is captured as an alarm-able event.
+# happened (3rd time). This file wires CloudTrail → EventBridge →
+# CloudWatch Logs so any DeleteRoute / DeleteVpcPeeringConnection call
+# against the critical resources is captured as an alarm-able event.
 #
-# Subscribe `aws_sns_topic.route_drift` to email later if you want pages.
+# IMPORTANT: EventBridge does NOT receive CloudTrail Management Events
+# unless an actual `aws_cloudtrail` Trail exists in the account. The bare
+# "CloudTrail Event History" (the default 90-day console view) does NOT
+# forward to EventBridge. The trail below is what makes the rule fire.
+
+# ── CloudTrail trail (required for EventBridge to receive API events) ──
+
+resource "aws_s3_bucket" "cloudtrail" {
+  count         = var.vpc_peering_enabled ? 1 : 0
+  bucket        = "${var.prefix}-cloudtrail"
+  force_destroy = true
+  tags          = { Name = "${var.prefix}-cloudtrail" }
+}
+
+resource "aws_s3_bucket_policy" "cloudtrail" {
+  count  = var.vpc_peering_enabled ? 1 : 0
+  bucket = aws_s3_bucket.cloudtrail[0].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AWSCloudTrailAclCheck"
+        Effect    = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action    = "s3:GetBucketAcl"
+        Resource  = aws_s3_bucket.cloudtrail[0].arn
+      },
+      {
+        Sid       = "AWSCloudTrailWrite"
+        Effect    = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.cloudtrail[0].arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
+        Condition = {
+          StringEquals = { "s3:x-amz-acl" = "bucket-owner-full-control" }
+        }
+      },
+    ]
+  })
+}
+
+resource "aws_cloudtrail" "main" {
+  count                         = var.vpc_peering_enabled ? 1 : 0
+  name                          = "${var.prefix}-management-events"
+  s3_bucket_name                = aws_s3_bucket.cloudtrail[0].id
+  is_multi_region_trail         = true
+  include_global_service_events = true
+  enable_logging                = true
+  depends_on                    = [aws_s3_bucket_policy.cloudtrail]
+  tags                          = { Name = "${var.prefix}-management-events" }
+}
 
 resource "aws_cloudwatch_log_group" "route_drift" {
   count             = var.vpc_peering_enabled ? 1 : 0
