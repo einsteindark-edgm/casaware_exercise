@@ -112,12 +112,18 @@ def _local_sync(query: str, tenant_filter: str, k: int) -> list[dict[str, Any]]:
         access_token=token,
     ) as conn:
         with conn.cursor() as cur:
+            # Embeddings live in a SEPARATE managed table because
+            # gold.expense_chunks is a DLT MV (no UPDATE/MERGE allowed).
+            # LEFT JOIN tolerates both: pre-computed embeddings (fast path)
+            # and rows where the activity hasn't run yet (NULL → on-the-fly).
             cur.execute(
                 f"""
-                SELECT chunk_id, expense_id, chunk_text, amount, currency,
-                       vendor, date, category, embedding
-                FROM {catalog}.gold.expense_chunks
-                WHERE tenant_id = %(tenant_id)s
+                SELECT c.chunk_id, c.expense_id, c.chunk_text, c.amount, c.currency,
+                       c.vendor, c.date, c.category, e.embedding
+                FROM {catalog}.gold.expense_chunks c
+                LEFT JOIN {catalog}.gold.expense_embeddings e
+                  ON c.chunk_id = e.chunk_id AND c.tenant_id = e.tenant_id
+                WHERE c.tenant_id = %(tenant_id)s
                 """,
                 {"tenant_id": tenant_filter},
             )

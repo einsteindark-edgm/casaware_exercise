@@ -12,9 +12,12 @@
 # COMMAND ----------
 import dlt
 from pyspark.sql.functions import col, concat, concat_ws, lit
-from pyspark.sql.types import ArrayType, FloatType
 
 
+# NOTE: this is a DLT MATERIALIZED VIEW — UPDATE/MERGE are not allowed on it.
+# Therefore embeddings live in a SEPARATE managed table `gold.expense_embeddings`
+# written by the Temporal activity `trigger_vector_sync`. vector_search.py
+# joins both tables.
 @dlt.table(
     name="expense_chunks",
     comment="Chunks de texto indexables por Mosaic AI Vector Search.",
@@ -51,9 +54,5 @@ def expense_chunks():
             col("final_date").cast("string").alias("date"),
             col("category"),
             col("approved_at"),
-            # `embedding` se popula por la activity Temporal `trigger_vector_sync`
-            # tras el approve. DLT inicializa NULL para alinear con la tabla
-            # existente (tiene la columna por un backfill manual previo).
-            lit(None).cast(ArrayType(FloatType())).alias("embedding"),
         )
     )

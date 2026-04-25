@@ -107,14 +107,18 @@ def _managed_sync(expense_id: str | None, tenant_id: str | None) -> dict[str, An
 
 
 def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, Any]:
-    """Embed the chunk_text for the given expense_id and UPDATE the column.
+    """Embed the chunk_text and MERGE into gold.expense_embeddings.
+
+    `gold.expense_chunks` is a DLT MATERIALIZED VIEW (UPDATE/MERGE not
+    allowed on it). Embeddings live in a SEPARATE managed table
+    `gold.expense_embeddings (chunk_id, tenant_id, embedding ARRAY<FLOAT>)`
+    that this activity owns. vector_search.py LEFT JOINs both.
 
     Polls gold.expense_chunks for up to ~18 minutes because the gold DLT
     pipeline runs every 10 min — the row may not have arrived by the time
-    the workflow approves the expense (typically 6s after). 18 min covers
-    two pipeline windows worst-case.
-    Idempotent: recomputes embedding if it already exists, so an HITL
-    re-resolve picks up the new chunk_text.
+    the workflow approves the expense (typically 6s after).
+    Idempotent: MERGE recomputes embedding if it already exists, so an
+    HITL re-resolve picks up the new chunk_text.
     """
     import time as _time
 
@@ -136,6 +140,19 @@ def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, 
         access_token=token,
     ) as conn:
         with conn.cursor() as cur:
+            # Make sure the embeddings table exists. CTAS-style, idempotent.
+            cur.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {catalog}.gold.expense_embeddings (
+                    chunk_id STRING NOT NULL,
+                    tenant_id STRING NOT NULL,
+                    embedding ARRAY<FLOAT>,
+                    updated_at TIMESTAMP
+                ) USING DELTA
+                PARTITIONED BY (tenant_id)
+                """
+            )
+
             row = None
             for attempt in range(18):
                 cur.execute(
@@ -163,16 +180,22 @@ def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, 
             embedding = _embed([chunk_text])[0]
 
             # Spark's array<float> bind is hairy from databricks-sql-connector;
-            # easiest is to format the literal inline. Float values are safe
-            # because we generated them from the embedding endpoint (no user
-            # input, no SQL injection risk).
+            # format the literal inline. Values come from the embedding
+            # endpoint (no user input, no SQL injection risk).
             literal = "ARRAY(" + ",".join(f"CAST({v} AS FLOAT)" for v in embedding) + ")"
             cur.execute(
                 f"""
-                UPDATE {catalog}.gold.expense_chunks
-                SET embedding = {literal}
-                WHERE chunk_id = %(chunk_id)s
-                  AND tenant_id = %(tenant_id)s
+                MERGE INTO {catalog}.gold.expense_embeddings t
+                USING (SELECT
+                    %(chunk_id)s AS chunk_id,
+                    %(tenant_id)s AS tenant_id,
+                    {literal} AS embedding,
+                    current_timestamp() AS updated_at
+                ) s
+                ON t.chunk_id = s.chunk_id AND t.tenant_id = s.tenant_id
+                WHEN MATCHED THEN UPDATE SET embedding = s.embedding, updated_at = s.updated_at
+                WHEN NOT MATCHED THEN INSERT (chunk_id, tenant_id, embedding, updated_at)
+                    VALUES (s.chunk_id, s.tenant_id, s.embedding, s.updated_at)
                 """,
                 {"chunk_id": chunk_id, "tenant_id": tenant_id},
             )
