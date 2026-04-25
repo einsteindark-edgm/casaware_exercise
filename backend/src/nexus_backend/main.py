@@ -29,6 +29,7 @@ from nexus_backend.observability.otel import install_otel
 from nexus_backend.observability.xray import install_xray
 from nexus_backend.services.mongodb import mongo
 from nexus_backend.services.redis_client import redis_pool
+from nexus_backend.services.s3 import s3_service
 from nexus_backend.services.temporal_client import temporal_service
 
 log = get_logger(__name__)
@@ -80,6 +81,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
     await mongo.connect()
     await redis_pool.connect()
     await temporal_service.connect()
+    # Resolve AWS task-role credentials once now so the first user request
+    # doesn't time out on the ECS metadata endpoint (169.254.170.2).
+    await s3_service.prime()
     try:
         await prime_jwks()
     except Exception as exc:

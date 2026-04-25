@@ -38,6 +38,11 @@ resource "aws_ecs_task_definition" "backend" {
     environment = [
       { name = "ENV", value = "dev" },
       { name = "AWS_REGION", value = var.aws_region },
+      # Stretch the ECS task-role credential fetch timeouts. The default
+      # (~1s, 1 attempt) was timing out under cold-start contention →
+      # CredentialRetrievalError on the first /expenses POST.
+      { name = "AWS_METADATA_SERVICE_TIMEOUT", value = "10" },
+      { name = "AWS_METADATA_SERVICE_NUM_ATTEMPTS", value = "5" },
       { name = "AUTH_MODE", value = "prod" },
       { name = "TEMPORAL_MODE", value = "real" },
       { name = "TEMPORAL_NAMESPACE", value = "default" },
