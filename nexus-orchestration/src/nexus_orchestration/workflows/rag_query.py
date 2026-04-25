@@ -171,11 +171,17 @@ class RAGQueryWorkflow:
                             "row_count": len(result) if isinstance(result, list) else 0,
                         }
                     )
+                    # Bedrock requires toolResult.content[*].json to be a JSON
+                    # object, not an array — wrap the list of rows in a dict.
+                    semantic_payload = {
+                        "rows": result if isinstance(result, list) else [],
+                        "row_count": len(result) if isinstance(result, list) else 0,
+                    }
                     tool_results.append(
                         {
                             "toolResult": {
                                 "toolUseId": tool_use_id,
-                                "content": [{"json": result}],
+                                "content": [{"json": semantic_payload}],
                             }
                         }
                     )
@@ -202,11 +208,16 @@ class RAGQueryWorkflow:
                             ),
                         }
                     )
+                    structured_payload = (
+                        result
+                        if isinstance(result, dict)
+                        else {"rows": result if isinstance(result, list) else []}
+                    )
                     tool_results.append(
                         {
                             "toolResult": {
                                 "toolUseId": tool_use_id,
-                                "content": [{"json": result}],
+                                "content": [{"json": structured_payload}],
                             }
                         }
                     )
