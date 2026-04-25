@@ -72,13 +72,20 @@ async def resolve_hitl(
     workflow_id = task["workflow_id"]
     bind_request_context(workflow_id=workflow_id)
 
+    # Bajo la UX estricta de abril 2026, el único decision válido es
+    # `accept_ocr` con `resolved_fields={}`. El schema ya lo enforca, pero
+    # forzamos aquí también por defensa en profundidad: cualquier cliente
+    # que bypassee el frontend obtiene el mismo comportamiento canónico.
+    decision = "accept_ocr"
+    resolved_fields: dict[str, Any] = {}
+
     now = datetime.now(UTC)
     await temporal_service.signal(
         workflow_id,
         "hitl_response",
         {
-            "resolved_fields": body.resolved_fields,
-            "decision": body.decision,
+            "resolved_fields": resolved_fields,
+            "decision": decision,
             "user_id": user.sub,
             "timestamp": now.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         },
@@ -90,8 +97,8 @@ async def resolve_hitl(
             "$set": {
                 "status": "resolved",
                 "resolved_at": now,
-                "decision": body.decision,
-                "resolved_fields": body.resolved_fields,
+                "decision": decision,
+                "resolved_fields": resolved_fields,
                 "resolved_by": user.sub,
             }
         },
@@ -108,8 +115,8 @@ async def resolve_hitl(
             "event_type": "hitl_resolved",
             "actor": {"type": "user", "id": user.sub},
             "details": {
-                "decision": body.decision,
-                "resolved_fields": body.resolved_fields,
+                "decision": decision,
+                "resolved_fields": resolved_fields,
                 "hitl_task_id": task_id,
             },
             "workflow_id": workflow_id,
@@ -117,7 +124,7 @@ async def resolve_hitl(
         }
     )
 
-    hitl_resolutions.labels(decision=body.decision).inc()
+    hitl_resolutions.labels(decision=decision).inc()
 
     event = EventEnvelope(
         event_type="workflow.hitl_resolved",
@@ -125,7 +132,7 @@ async def resolve_hitl(
         tenant_id=user.tenant_id,
         user_id=user.sub,
         expense_id=task.get("expense_id"),
-        payload={"hitl_task_id": task_id, "decision": body.decision},
+        payload={"hitl_task_id": task_id, "decision": decision},
     )
     await sse_broker.publish_many(
         [

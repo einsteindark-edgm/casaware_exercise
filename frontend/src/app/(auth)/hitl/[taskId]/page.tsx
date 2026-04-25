@@ -2,10 +2,9 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api/client";
 import { toast } from "sonner";
@@ -25,13 +24,10 @@ export default function HITLResolverPage() {
   const taskId = params.taskId as string;
   const pendingHITL = useSSEStore(state => state.pendingHITL);
   const removePendingHITL = useSSEStore(state => state.removePendingHITL);
-  
+
   const [task, setTask] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  
-  // Custom values
-  const [customValues, setCustomValues] = useState<Record<string, string>>({});
 
   useEffect(() => {
     // Prefer the in-memory SSE cache (no round-trip) so we don't flash loading
@@ -58,22 +54,22 @@ export default function HITLResolverPage() {
           fieldsInConflict: data.fields_in_conflict || [],
         });
       })
-      .catch((err) => {
+      .catch(() => {
         toast.error("Could not load task");
       })
       .finally(() => setLoading(false));
   }, [taskId, pendingHITL]);
 
-  const handleResolve = async (decision: "accept_ocr" | "keep_user_value" | "custom") => {
+  // UX estricta (abril 2026): el único decision válido es accept_ocr y
+  // resolved_fields siempre vacío. El backend además forzará esto por
+  // defensa en profundidad.
+  const handleAccept = async () => {
     setSubmitting(true);
     try {
       await apiClient.post(`api/v1/hitl/${taskId}/resolve`, {
-        json: {
-          decision,
-          resolved_fields: decision === "custom" ? customValues : {},
-        },
+        json: { decision: "accept_ocr", resolved_fields: {} },
       });
-      toast.success("Task resolved successfully");
+      toast.success("Correction accepted");
       removePendingHITL(taskId);
       router.push(`/expenses/${task.expenseId}`);
     } catch (err) {
@@ -90,7 +86,10 @@ export default function HITLResolverPage() {
     <div className="max-w-3xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-gray-900">Manual Review Required</h1>
-        <p className="text-gray-500">The automatic auditor detected discrepancies. Please resolve the conflict.</p>
+        <p className="text-gray-500">
+          The validator detected the corrections below. Accept them to keep the audit trail consistent —
+          your original values stay preserved in history.
+        </p>
       </div>
 
       <div className="space-y-6">
@@ -104,54 +103,39 @@ export default function HITLResolverPage() {
             </CardHeader>
             <CardContent className="pt-6">
               <div className="grid grid-cols-2 gap-8">
-                {/* User Value */}
+                {/* User Value (preserved as historical record) */}
                 <div className="space-y-2 p-4 rounded-lg bg-gray-50 border border-gray-100">
                   <Label className="text-gray-500 uppercase text-xs font-bold tracking-wider">You Reported</Label>
                   <p className="text-2xl font-medium">{String(conflict.user_value)}</p>
+                  <p className="text-[11px] text-gray-400">Will stay in your history</p>
                 </div>
-                
-                {/* OCR Value */}
+
+                {/* OCR Value (will become the final value) */}
                 <div className="space-y-2 p-4 rounded-lg bg-blue-50 border border-blue-100">
                   <div className="flex justify-between items-center">
-                    <Label className="text-blue-600 uppercase text-xs font-bold tracking-wider">OCR Detected</Label>
+                    <Label className="text-blue-600 uppercase text-xs font-bold tracking-wider">Suggested correction</Label>
                     <Badge variant="outline" className="text-blue-700 bg-blue-100 border-blue-200">
                       Conf: {conflict.confidence}%
                     </Badge>
                   </div>
                   <p className="text-2xl font-medium text-blue-900">{String(conflict.ocr_value)}</p>
+                  <p className="text-[11px] text-blue-600">Will become the final value</p>
                 </div>
-              </div>
-
-              <div className="mt-6">
-                <Label>Manual Edit (Optional)</Label>
-                <Input 
-                  className="mt-2"
-                  placeholder="Enter the correct value if both are wrong..."
-                  value={customValues[conflict.field] || ""}
-                  onChange={(e) => setCustomValues({...customValues, [conflict.field]: e.target.value})}
-                />
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      <div className="flex justify-end gap-4 mt-8 pt-4 border-t border-gray-200">
-        <Button 
-          variant="outline" 
-          onClick={() => handleResolve("keep_user_value")}
-          disabled={submitting}
-        >
-          Keep my value
-        </Button>
-        <Button 
+      <div className="flex justify-end mt-8 pt-4 border-t border-gray-200">
+        <Button
           variant="default"
-          onClick={() => handleResolve(Object.keys(customValues).length > 0 ? "custom" : "accept_ocr")}
+          onClick={handleAccept}
           disabled={submitting}
           className="bg-blue-600 hover:bg-blue-700"
         >
           <Check className="w-4 h-4 mr-2" />
-          {Object.keys(customValues).length > 0 ? "Accept edited value" : "Accept OCR suggestion"}
+          Accept correction
         </Button>
       </div>
     </div>

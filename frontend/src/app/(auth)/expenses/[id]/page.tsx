@@ -15,6 +15,7 @@ interface ExpenseRead {
   expense_id: string;
   status: "pending" | "processing" | "hitl_required" | "approved" | "rejected";
   workflow_id: string;
+  // Original user-reported values — never overwritten, preserved as audit trail.
   amount: number;
   currency: string;
   date: string;
@@ -22,6 +23,41 @@ interface ExpenseRead {
   category: string;
   receipt_id: string;
   created_at: string;
+  // Post-approval values (populated after HITL or auto-approval). NULL until
+  // the workflow reaches the finalize step.
+  final_amount?: number | null;
+  final_vendor?: string | null;
+  final_date?: string | null;
+  final_currency?: string | null;
+  // Per-field provenance: "user" | "ocr" | "hitl_custom".
+  source_per_field?: Record<string, string> | null;
+  approved_at?: string | null;
+  // Computed by the backend from source_per_field (true if any field was
+  // sourced from OCR/HITL rather than the user).
+  had_hitl?: boolean;
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  amount: "Amount",
+  vendor: "Vendor",
+  date: "Date",
+  currency: "Currency",
+};
+
+function formatFinalValue(field: string, value: unknown, currency: string | null | undefined): string {
+  if (value == null || value === "") return "—";
+  if (field === "amount" && typeof value === "number") {
+    const cur = currency || "";
+    return `${value.toLocaleString(undefined, { minimumFractionDigits: 2 })} ${cur}`.trim();
+  }
+  if (field === "date") {
+    try {
+      return new Date(String(value)).toLocaleDateString();
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
 }
 
 interface WorkflowStatus {
@@ -549,6 +585,82 @@ export default function ExpenseDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {expense?.had_hitl && (
+        <Card className="border-blue-200">
+          <CardHeader>
+            <CardTitle>Corrections after review</CardTitle>
+            <CardDescription>
+              The validator detected discrepancies. You accepted the corrections —
+              your original values are preserved here for the audit trail.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {(() => {
+              const sources = expense.source_per_field || {};
+              const finals: Record<string, unknown> = {
+                amount: expense.final_amount,
+                vendor: expense.final_vendor,
+                date: expense.final_date,
+                currency: expense.final_currency,
+              };
+              const originals: Record<string, unknown> = {
+                amount: expense.amount,
+                vendor: expense.vendor,
+                date: expense.date,
+                currency: expense.currency,
+              };
+              const changedFields = Object.keys(FIELD_LABELS).filter(
+                (f) => sources[f] && sources[f] !== "user"
+              );
+              if (changedFields.length === 0) {
+                return (
+                  <p className="text-sm text-gray-600">
+                    The reviewer confirmed your original values — no fields were changed.
+                  </p>
+                );
+              }
+              return (
+                <div className="space-y-3">
+                  {changedFields.map((field) => {
+                    const source = sources[field];
+                    const finalCurrency = (finals.currency as string | null | undefined) ?? expense.currency;
+                    return (
+                      <div
+                        key={field}
+                        className="grid grid-cols-1 md:grid-cols-[120px_1fr_auto_1fr_auto] items-center gap-3 p-3 rounded-md border border-blue-100 bg-blue-50/30"
+                      >
+                        <span className="text-xs uppercase font-bold tracking-wider text-gray-500">
+                          {FIELD_LABELS[field]}
+                        </span>
+                        <div className="space-y-0.5">
+                          <p className="text-[10px] uppercase text-gray-400">You reported</p>
+                          <p className="text-sm text-gray-700 line-through decoration-gray-300">
+                            {formatFinalValue(field, originals[field], expense.currency)}
+                          </p>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-blue-400 hidden md:block" />
+                        <div className="space-y-0.5">
+                          <p className="text-[10px] uppercase text-blue-500">Final value</p>
+                          <p className="text-sm font-medium text-blue-900">
+                            {formatFinalValue(field, finals[field], finalCurrency)}
+                          </p>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] bg-blue-100 text-blue-700 border-blue-200"
+                        >
+                          {source === "ocr" ? "from OCR" : source === "hitl_custom" ? "manual" : source}
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
