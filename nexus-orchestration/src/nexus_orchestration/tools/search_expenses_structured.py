@@ -8,11 +8,16 @@ from __future__ import annotations
 SEARCH_EXPENSES_STRUCTURED_TOOL: dict = {
     "name": "search_expenses_structured",
     "description": (
-        "Busca gastos por filtros EXACTOS (vendor, categoría, rango de monto, "
-        "rango de fechas, moneda). Úsala cuando la pregunta tiene datos "
-        "concretos ('cuánto gasté en Uber', 'recibos entre $100 y $500 en "
-        "marzo'). Devuelve el total agregado (aggregate=sum|count) o hasta "
-        "50 filas (aggregate=list) con expense_id para citar."
+        "Búsqueda SQL exacta. Úsala SOLO cuando la pregunta del usuario "
+        "menciona explícitamente al menos uno de: un vendor con nombre "
+        "concreto ('Uber'), un valor o rango monetario ('más de $100'), "
+        "una fecha o rango ('marzo', 'entre el 1 y 15'), una moneda "
+        "('dólares', 'pesos'), una categoría exacta ('comida', 'viaje'), "
+        "o pide un total/suma/conteo ('cuánto gasté'). Para todo lo demás "
+        "—temas difusos, intenciones, exploración— usa "
+        "`search_expenses_semantic`. Si dudas, prefiere semantic. Devuelve "
+        "el agregado (aggregate=sum|count) o hasta 50 filas (aggregate=list) "
+        "con expense_id para citar."
     ),
     "input_schema": {
         "type": "object",
@@ -44,8 +49,13 @@ SEARCH_EXPENSES_STRUCTURED_TOOL: dict = {
                 "enum": ["sum", "count", "list"],
                 "default": "list",
                 "description": (
-                    "sum/count devuelven un único total. list devuelve hasta "
-                    "`limit` filas."
+                    "Usa 'list' (default) para preguntas tipo '¿tengo gastos "
+                    "de X?' o 'muéstrame mis gastos'. Usa 'sum' SOLO cuando "
+                    "el usuario pide un total monetario explícito ('cuánto "
+                    "gasté'). Usa 'count' SOLO cuando pide un número de "
+                    "recibos explícito ('cuántos recibos'). Tanto sum como "
+                    "count devuelven también hasta 10 filas en `rows` con "
+                    "expense_id reales para citar."
                 ),
             },
             "limit": {

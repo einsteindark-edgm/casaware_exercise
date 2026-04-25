@@ -16,7 +16,7 @@ from nexus_orchestration.activities.sql_search import build_sql
 
 
 def test_tenant_filter_always_present():
-    sql, params, _ = build_sql({"vendor": "Uber"}, tenant_filter="t_ACME", catalog="nexus_dev")
+    sql, params, _, _ = build_sql({"vendor": "Uber"}, tenant_filter="t_ACME", catalog="nexus_dev")
     assert "tenant_id = %(tenant_id)s" in sql
     assert params["tenant_id"] == "t_ACME"
 
@@ -27,7 +27,7 @@ def test_no_filters_rejected():
 
 
 def test_limit_clamped_to_50():
-    sql, _, _ = build_sql(
+    sql, _, _, _ = build_sql(
         {"vendor": "Uber", "aggregate": "list", "limit": 999},
         tenant_filter="t_ACME",
         catalog="nexus_dev",
@@ -36,7 +36,7 @@ def test_limit_clamped_to_50():
 
 
 def test_limit_minimum_1():
-    sql, _, _ = build_sql(
+    sql, _, _, _ = build_sql(
         {"vendor": "Uber", "aggregate": "list", "limit": 0},
         tenant_filter="t_ACME",
         catalog="nexus_dev",
@@ -44,12 +44,12 @@ def test_limit_minimum_1():
     assert "LIMIT 1" in sql
 
 
-def test_vendor_case_insensitive_binding():
-    sql, params, _ = build_sql(
+def test_vendor_case_insensitive_substring_binding():
+    sql, params, _, _ = build_sql(
         {"vendor": "UBER"}, tenant_filter="t_ACME", catalog="nexus_dev"
     )
-    assert "LOWER(final_vendor) = %(vendor)s" in sql
-    assert params["vendor"] == "uber"
+    assert "LOWER(final_vendor) LIKE %(vendor)s" in sql
+    assert params["vendor"] == "%uber%"
 
 
 def test_category_whitelisted():
@@ -79,7 +79,7 @@ def test_aggregate_whitelisted():
 
 
 def test_sum_shape():
-    sql, params, agg = build_sql(
+    sql, params, agg, _ = build_sql(
         {"vendor": "Uber", "aggregate": "sum"},
         tenant_filter="t_ACME",
         catalog="nexus_dev",
@@ -90,7 +90,7 @@ def test_sum_shape():
 
 
 def test_count_shape():
-    sql, _, agg = build_sql(
+    sql, _, agg, _ = build_sql(
         {"vendor": "Uber", "aggregate": "count"},
         tenant_filter="t_ACME",
         catalog="nexus_dev",
@@ -104,15 +104,15 @@ def test_sql_injection_attempt_in_vendor_becomes_bind_param():
     parameter value carries it, which the driver binds safely.
     """
     payload = "' OR 1=1 --"
-    sql, params, _ = build_sql(
+    sql, params, _, _ = build_sql(
         {"vendor": payload}, tenant_filter="t_ACME", catalog="nexus_dev"
     )
     assert payload.lower() not in sql.lower()
-    assert params["vendor"] == payload.lower()
+    assert params["vendor"] == f"%{payload.lower()}%"
 
 
 def test_date_and_amount_range_all_bound():
-    sql, params, _ = build_sql(
+    sql, params, _, _ = build_sql(
         {
             "date_from": "2026-03-01",
             "date_to": "2026-03-31",
@@ -131,7 +131,7 @@ def test_date_and_amount_range_all_bound():
 
 
 def test_catalog_interpolated_in_table_only():
-    sql, _, _ = build_sql(
+    sql, _, _, _ = build_sql(
         {"vendor": "Uber"}, tenant_filter="t_X", catalog="my_catalog"
     )
     assert "my_catalog.gold.expense_audit" in sql

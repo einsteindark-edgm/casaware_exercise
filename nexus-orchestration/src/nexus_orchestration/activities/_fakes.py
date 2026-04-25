@@ -128,7 +128,9 @@ def fake_sql_search(
             "aggregate_kind": "sum",
             "aggregate_value": total,
             "currency": currency,
-            "rows": [],
+            # Include the same sample rows so the LLM can cite real expense_ids
+            # without needing a follow-up tool call.
+            "rows": rows,
             "row_count_total": len(rows),
         }
     if aggregate_kind == "count":
@@ -136,7 +138,7 @@ def fake_sql_search(
             "aggregate_kind": "count",
             "aggregate_value": len(rows),
             "currency": None,
-            "rows": [],
+            "rows": rows,
             "row_count_total": len(rows),
         }
     return {

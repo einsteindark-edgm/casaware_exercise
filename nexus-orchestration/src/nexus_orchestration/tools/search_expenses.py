@@ -10,9 +10,13 @@ SEARCH_EXPENSES_SEMANTIC_TOOL: dict = {
     "name": "search_expenses_semantic",
     "description": (
         "Búsqueda semántica (vector) sobre los recibos aprobados del usuario. "
-        "Úsala para preguntas difusas o temáticas — p. ej. 'recibos sobre "
-        "viajes', 'gastos relacionados con comida saludable'. No sirve para "
-        "totales exactos ni filtros por monto/fecha: para eso usa "
+        "Úsala por DEFAULT para cualquier pregunta que NO contenga "
+        "explícitamente un vendor con nombre, una fecha, un monto, una "
+        "moneda, una categoría exacta, ni pida totales/conteos. Ideal para "
+        "preguntas temáticas o exploratorias — 'recibos sobre transporte', "
+        "'gastos relacionados con un cliente', 'qué gastos extraños tengo', "
+        "'cosas relacionadas con marketing'. No sirve para totales exactos "
+        "ni filtros por monto/fecha: para eso usa "
         "`search_expenses_structured`."
     ),
     "input_schema": {
@@ -24,8 +28,12 @@ SEARCH_EXPENSES_SEMANTIC_TOOL: dict = {
             },
             "k": {
                 "type": "integer",
-                "description": "Número de resultados",
-                "default": 5,
+                "description": (
+                    "Número de candidatos a recuperar antes de filtrar por "
+                    "score mínimo. 10 es un buen default; sube a 20 si la "
+                    "primera búsqueda devolvió pocas filas."
+                ),
+                "default": 10,
             },
         },
         "required": ["query"],

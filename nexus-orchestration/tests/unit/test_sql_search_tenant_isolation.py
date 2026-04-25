@@ -21,7 +21,7 @@ def test_build_sql_requires_tenant_filter():
 def test_build_sql_ignores_tenant_keys_in_input():
     # Input also contains a tenant_id claim — the builder doesn't look at it,
     # the only tenant that ends up in the SQL is the one we pass explicitly.
-    sql, params, _ = build_sql(
+    sql, params, _, _ = build_sql(
         {"vendor": "Uber", "tenant_id": "t_ATTACKER"},
         tenant_filter="t_OWNER",
         catalog="nexus_dev",
@@ -39,7 +39,7 @@ async def test_activity_drops_llm_supplied_tenant_claims(monkeypatch):
     """
     captured: dict = {}
 
-    async def fake_to_thread(fn, sql, params, agg):
+    async def fake_to_thread(fn, sql, params, agg, *_extra):
         captured["params"] = params
         return {
             "aggregate_kind": agg,

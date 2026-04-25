@@ -7,6 +7,7 @@ the real streaming contract.
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,99 @@ from ulid import ULID
 
 from nexus_orchestration.activities._fakes import fake_bedrock_stream
 from nexus_orchestration.config import settings
+
+
+# ── Hallucinated-link sanitizer (streaming) ─────────────────────────────────
+#
+# When Bedrock streams text tokens, we want to drop any [...](/expenses/<id>)
+# whose <id> wasn't returned by a real tool_result. We can't just regex the
+# final text — the user is already seeing tokens via Redis. So we hold tokens
+# that look like the start of an /expenses/ link until we can either close
+# and validate them, or determine they're safe to release.
+
+_FULL_LINK_RE = re.compile(r"\[([^\]]*)\]\(\s*/expenses/([\w\-]+)\s*\)")
+# A buffer prefix that *might* still grow into an /expenses/ link. We hold
+# back from emitting until we know it isn't one.
+_PARTIAL_LINK_RE = re.compile(
+    r"\[(?:[^\]]*(?:\]\(\s*(?:/(?:e(?:x(?:p(?:e(?:n(?:s(?:e(?:s(?:/[\w\-]*)?)?)?)?)?)?)?)?)?)?)?)?$"
+)
+
+
+class _LinkSanitizer:
+    """Streaming filter: drops `[...](/expenses/<id>)` markdown links whose
+    id is not in `allowed_ids`. Other text passes through unchanged.
+
+    Tokens may arrive mid-link, so we keep a small tail buffer of any chars
+    that could still be the prefix of an /expenses/ link and only emit them
+    once we're sure (link closed, or pattern broken).
+    """
+
+    def __init__(self, allowed_ids: set[str]) -> None:
+        self.allowed = allowed_ids
+        self._buf = ""
+
+    def feed(self, token: str) -> str:
+        self._buf += token
+        return self._drain(final=False)
+
+    def flush(self) -> str:
+        # End of stream: emit whatever's left, but drop any still-partial
+        # /expenses/ link prefix (it can only be a fabrication that the
+        # model never closed — common when it gets truncated mid-link).
+        return self._drain(final=True)
+
+    def _drain(self, final: bool) -> str:
+        # Resolve every closed /expenses/ link first.
+        def repl(m: re.Match[str]) -> str:
+            return m.group(0) if m.group(2) in self.allowed else ""
+
+        cleaned = _FULL_LINK_RE.sub(repl, self._buf)
+
+        if final:
+            # Any remaining partial /expenses/ prefix is a hallucination.
+            cleaned = _PARTIAL_LINK_RE.sub("", cleaned)
+            self._buf = ""
+            return cleaned
+
+        # Find the longest tail that might still grow into an /expenses/ link.
+        m = _PARTIAL_LINK_RE.search(cleaned)
+        if m and m.end() == len(cleaned):
+            held_from = m.start()
+            out = cleaned[:held_from]
+            self._buf = cleaned[held_from:]
+            return out
+
+        self._buf = ""
+        return cleaned
+
+
+def _allowed_ids_from_messages(messages: list[dict[str, Any]]) -> set[str]:
+    allowed: set[str] = set()
+    for msg in messages or []:
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        for block in msg.get("content") or []:
+            if not isinstance(block, dict):
+                continue
+            tr = block.get("toolResult")
+            if not isinstance(tr, dict):
+                continue
+            for item in tr.get("content") or []:
+                if not isinstance(item, dict):
+                    continue
+                payload = item.get("json")
+                rows: list[Any] = []
+                if isinstance(payload, list):
+                    rows = payload
+                elif isinstance(payload, dict):
+                    if isinstance(payload.get("rows"), list):
+                        rows = payload["rows"]
+                for r in rows:
+                    if isinstance(r, dict):
+                        eid = r.get("expense_id")
+                        if isinstance(eid, str) and eid:
+                            allowed.add(eid)
+    return allowed
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -112,6 +206,12 @@ async def bedrock_converse(inp: dict[str, Any]) -> dict[str, Any]:
     user_id = inp["user_id"]
     workflow_id = inp["workflow_id"]
 
+    # Hallucinated-link guard: gather expense_ids from prior tool_results in
+    # this conversation and gate every text token through the sanitizer
+    # before it reaches Redis subscribers.
+    allowed_ids = _allowed_ids_from_messages(inp.get("messages") or [])
+    sanitizer = _LinkSanitizer(allowed_ids)
+
     for event in response["stream"]:
         activity.heartbeat()
 
@@ -119,13 +219,24 @@ async def bedrock_converse(inp: dict[str, Any]) -> dict[str, Any]:
             delta = event["contentBlockDelta"]["delta"]
             if "text" in delta:
                 token = delta["text"]
-                current_text += token
-                await _publish_token(redis_client, tenant_id, user_id, workflow_id, token)
+                safe = sanitizer.feed(token)
+                if safe:
+                    current_text += safe
+                    await _publish_token(
+                        redis_client, tenant_id, user_id, workflow_id, safe
+                    )
             elif "toolUse" in delta and current_tool_use is not None:
                 current_tool_input_json += delta["toolUse"].get("input", "") or ""
         elif "contentBlockStart" in event:
             start = event["contentBlockStart"]["start"]
             if "toolUse" in start:
+                # Flush any text held in the sanitizer before switching block.
+                tail = sanitizer.flush()
+                if tail:
+                    current_text += tail
+                    await _publish_token(
+                        redis_client, tenant_id, user_id, workflow_id, tail
+                    )
                 current_tool_use = {
                     "toolUse": {
                         "toolUseId": start["toolUse"]["toolUseId"],
@@ -145,11 +256,27 @@ async def bedrock_converse(inp: dict[str, Any]) -> dict[str, Any]:
                 accumulated_content.append(current_tool_use)
                 current_tool_use = None
                 current_tool_input_json = ""
-            elif current_text:
-                accumulated_content.append({"text": current_text})
-                current_text = ""
+            else:
+                tail = sanitizer.flush()
+                if tail:
+                    current_text += tail
+                    await _publish_token(
+                        redis_client, tenant_id, user_id, workflow_id, tail
+                    )
+                if current_text:
+                    accumulated_content.append({"text": current_text})
+                    current_text = ""
         elif "messageStop" in event:
             stop_reason = event["messageStop"]["stopReason"]
+
+    # If the stream ended without a clean contentBlockStop, drain anything
+    # the sanitizer is still holding.
+    tail = sanitizer.flush()
+    if tail:
+        current_text += tail
+        await _publish_token(redis_client, tenant_id, user_id, workflow_id, tail)
+    if current_text:
+        accumulated_content.append({"text": current_text})
 
     return {"content": accumulated_content, "stop_reason": stop_reason}
 

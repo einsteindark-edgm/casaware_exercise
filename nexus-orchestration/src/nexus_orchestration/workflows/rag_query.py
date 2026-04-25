@@ -65,7 +65,9 @@ class RAGQueryWorkflow:
         ]
 
         tool_calls_log: list[dict[str, Any]] = []
-        max_iterations = 5
+        # Up to 3 retry attempts for empty results + 1 final answer turn.
+        # Bedrock counts each tool round-trip as one iteration here.
+        max_iterations = 6
 
         for _ in range(max_iterations):
             if self._cancelled:

@@ -38,14 +38,18 @@ _ALLOWED_CATEGORIES = {"travel", "food", "lodging", "office", "other"}
 _ALLOWED_CURRENCIES = {"COP", "USD", "EUR"}
 _ALLOWED_AGGREGATES = {"sum", "count", "list"}
 _MAX_LIMIT = 50
+# When aggregate=count/sum, we still fetch a small sample of real rows so the
+# LLM has actual expense_ids to cite. Without this it would either invent IDs
+# or refuse to cite — both bad UX. Keep it small to bound payload size.
+_AGGREGATE_SAMPLE_LIMIT = 10
 
 
 def build_sql(
     tool_input: dict[str, Any],
     tenant_filter: str,
     catalog: str,
-) -> tuple[str, dict[str, Any], str]:
-    """Pure SQL builder. Returns (sql, bind_params, aggregate_kind).
+) -> tuple[str, dict[str, Any], str, str]:
+    """Pure SQL builder. Returns (sql, bind_params, aggregate_kind, where_clause).
 
     Raises ValueError if no filters are provided or if an input is invalid.
     No f-string concat of user data — only column names and the catalog
@@ -59,8 +63,12 @@ def build_sql(
 
     vendor = tool_input.get("vendor")
     if vendor:
-        params["vendor"] = str(vendor).strip().lower()
-        where.append("LOWER(final_vendor) = %(vendor)s")
+        # Substring match (case-insensitive) so "uber" matches
+        # "Uber Technologies Inc" or "UBER BV". The user-supplied fragment
+        # stays as a bound parameter — only the % wildcards are concatenated
+        # in SQL, never the value itself.
+        params["vendor"] = f"%{str(vendor).strip().lower()}%"
+        where.append("LOWER(final_vendor) LIKE %(vendor)s")
         user_filter_count += 1
 
     category = tool_input.get("category")
@@ -150,7 +158,7 @@ def build_sql(
     # Invariant: tenant clause present. Belt-and-braces — unit tested.
     assert "tenant_id = %(tenant_id)s" in sql
 
-    return sql, params, aggregate
+    return sql, params, aggregate, where_clause
 
 
 def _rows_with_link(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -166,10 +174,30 @@ def _rows_with_link(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _normalize_sample_rows(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize the count/sum companion sample to the same shape as the
+    list aggregate so downstream code (citations, LLM) is uniform."""
+    normalized: list[dict[str, Any]] = []
+    for r in raw:
+        normalized.append(
+            {
+                "expense_id": r.get("expense_id"),
+                "vendor": r.get("vendor"),
+                "amount": float(r["amount"]) if r.get("amount") is not None else None,
+                "currency": r.get("currency"),
+                "date": str(r["date_"]) if r.get("date_") is not None else None,
+                "category": r.get("category"),
+            }
+        )
+    return _rows_with_link(normalized)
+
+
 def _run_databricks_sql(
     sql: str,
     params: dict[str, Any],
     aggregate_kind: str,
+    catalog: str,
+    where_clause: str,
 ) -> dict[str, Any]:
     from databricks import sql as dbsql  # type: ignore[import-not-found]
 
@@ -183,6 +211,25 @@ def _run_databricks_sql(
             cols = [d[0] for d in cur.description]
             fetched = cur.fetchall()
 
+            # For count/sum we also need real rows so the LLM can cite without
+            # inventing IDs. Run a small bounded sample query in the SAME
+            # connection (no extra round-trip warmup).
+            sample_rows: list[dict[str, Any]] = []
+            if aggregate_kind in ("sum", "count"):
+                sample_sql = (
+                    f"SELECT expense_id, final_vendor AS vendor, "  # noqa: S608
+                    f"final_amount AS amount, final_currency AS currency, "
+                    f"final_date AS date_, category "
+                    f"FROM {catalog}.gold.expense_audit WHERE {where_clause} "
+                    f"ORDER BY final_date DESC "
+                    f"LIMIT {_AGGREGATE_SAMPLE_LIMIT}"
+                )
+                cur.execute(sample_sql, params)
+                scols = [d[0] for d in cur.description]
+                sample_rows = [
+                    dict(zip(scols, r, strict=False)) for r in cur.fetchall()
+                ]
+
     rows = [dict(zip(cols, r, strict=False)) for r in fetched]
 
     if aggregate_kind == "sum":
@@ -192,7 +239,7 @@ def _run_databricks_sql(
             "aggregate_kind": "sum",
             "aggregate_value": float(total) if total is not None else 0.0,
             "currency": row.get("currency"),
-            "rows": [],
+            "rows": _normalize_sample_rows(sample_rows),
             "row_count_total": int(row.get("n") or 0),
         }
     if aggregate_kind == "count":
@@ -201,7 +248,7 @@ def _run_databricks_sql(
             "aggregate_kind": "count",
             "aggregate_value": int(row.get("n") or 0),
             "currency": None,
-            "rows": [],
+            "rows": _normalize_sample_rows(sample_rows),
             "row_count_total": int(row.get("n") or 0),
         }
 
@@ -250,7 +297,7 @@ async def search_expenses_structured(inp: dict[str, Any]) -> dict[str, Any]:
         workflow_id=workflow_id,
     ) as span:
         try:
-            sql_text, params, aggregate = build_sql(
+            sql_text, params, aggregate, where_clause = build_sql(
                 tool_input,
                 tenant_filter=tenant_filter,
                 catalog=settings.databricks_catalog,
@@ -268,7 +315,12 @@ async def search_expenses_structured(inp: dict[str, Any]) -> dict[str, Any]:
             result["rows"] = _rows_with_link(result.get("rows", []))
         else:
             result = await asyncio.to_thread(
-                _run_databricks_sql, sql_text, params, aggregate
+                _run_databricks_sql,
+                sql_text,
+                params,
+                aggregate,
+                settings.databricks_catalog,
+                where_clause,
             )
 
         span["row_count"] = int(result.get("row_count_total") or 0)

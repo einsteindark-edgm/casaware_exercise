@@ -31,12 +31,19 @@ from nexus_orchestration.observability.rag_metrics import tool_call_span
 
 VECTOR_BACKEND = os.environ.get("VECTOR_BACKEND", "local").lower()
 
+# Cosine similarity below this is treated as noise. Calibrated empirically
+# against the seeded chunk corpus — bge-large-en relevant matches typically
+# score >= 0.45 against well-formed Spanish queries about expense rows.
+_MIN_SCORE = float(os.environ.get("VECTOR_MIN_SCORE", "0.40"))
+
 
 @activity.defn(name="vector_similarity_search")
 async def vector_similarity_search(inp: dict[str, Any]) -> list[dict[str, Any]]:
     query = inp["query"]
     tenant_filter = inp["tenant_filter"]
-    k = int(inp.get("k", 5))
+    # Default K bumped from 5 → 10 so the LLM has more candidates to reason
+    # over for fuzzy/thematic questions. The score filter below trims noise.
+    k = int(inp.get("k", 10))
     assert tenant_filter, "tenant_filter is required"
 
     try:
@@ -50,16 +57,22 @@ async def vector_similarity_search(inp: dict[str, Any]) -> list[dict[str, Any]]:
     ) as span:
         if settings.use_fake_vector_search:
             result = fake_vector_search(query, tenant_filter, k)
-            span["row_count"] = len(result)
-            return result
-
-        if VECTOR_BACKEND == "managed":
+        elif VECTOR_BACKEND == "managed":
             result = await _managed_vector_search(query, tenant_filter, k)
         else:
             result = await _local_vector_search(query, tenant_filter, k)
 
-        span["row_count"] = len(result)
-        return result
+        # Drop low-confidence rows so the LLM doesn't cite noise. We only
+        # filter when score is present (managed VS doesn't always expose it).
+        filtered = [
+            r for r in result
+            if not isinstance(r, dict)
+            or r.get("score") is None
+            or float(r["score"]) >= _MIN_SCORE
+        ]
+        span["row_count"] = len(filtered)
+        span["row_count_pre_filter"] = len(result)
+        return filtered
 
 
 # ── Local backend (no Databricks managed VS) ───────────────────────────────
