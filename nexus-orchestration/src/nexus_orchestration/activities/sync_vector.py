@@ -6,24 +6,30 @@ Two backends, selected by `VECTOR_BACKEND` env (matches activities/vector_search
                 workspace tier supports the auto-managed embedding pipeline.
 
   - "local"   → reads the chunk row from `gold.expense_chunks`, embeds the
-                `chunk_text` via Foundation Models API, and UPDATEs the
-                `embedding` column. The chat's vector_similarity_search then
-                reads pre-computed embeddings and only embeds the user query.
+                `chunk_text` via Foundation Models API, and MERGEs into
+                `gold.expense_embeddings`.
 
-Best-effort: if anything fails the audit MUST NOT fail. Vector search is a
-downstream consumer, not part of the financial source of truth.
+Implemented as a SYNC activity (per Temporal Python best practice for
+blocking I/O — databricks-sql-connector + urllib are both blocking). Sync
+activities run in the worker's `activity_executor` ThreadPoolExecutor; in
+that context `activity.heartbeat()` works correctly. The previous async +
+`asyncio.to_thread` design crashed with `RuntimeError: no running event
+loop` because `activity.heartbeat()` from a to_thread worker can't reach
+the activity's asyncio loop (incident: 2026-04-25, expense
+01KQ37YXE34Q4JWEQ17CQRX5WQ).
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import ssl
+import time
 import urllib.error
 import urllib.request
 from typing import Any
 
 from temporalio import activity
+from temporalio.exceptions import CancelledError as TemporalCancelledError
 
 from nexus_orchestration.config import settings
 from nexus_orchestration.observability.logging import get_logger
@@ -34,7 +40,7 @@ VECTOR_BACKEND = os.environ.get("VECTOR_BACKEND", "local").lower()
 
 
 @activity.defn(name="trigger_vector_sync")
-async def trigger_vector_sync(inp: dict[str, Any] | None = None) -> dict[str, Any]:
+def trigger_vector_sync(inp: dict[str, Any] | None = None) -> dict[str, Any]:
     inp = inp or {}
     expense_id = inp.get("expense_id")
     tenant_id = inp.get("tenant_id")
@@ -58,8 +64,17 @@ async def trigger_vector_sync(inp: dict[str, Any] | None = None) -> dict[str, An
     try:
         if VECTOR_BACKEND == "managed":
             return _managed_sync(expense_id, tenant_id)
-        return await asyncio.to_thread(_local_sync_one, expense_id, tenant_id)
-    except Exception as exc:  # never fail the audit
+        return _local_sync_one(expense_id, tenant_id)
+    except TemporalCancelledError:
+        # Cancellation is delivered via heartbeat; let it bubble so Temporal
+        # records the activity as CANCELLED rather than FAILED.
+        log.info(
+            "vector_sync.cancelled",
+            expense_id=expense_id,
+            tenant_id=tenant_id,
+        )
+        raise
+    except Exception as exc:
         log.error(
             "vector_sync.failed",
             error=type(exc).__name__,
@@ -67,7 +82,7 @@ async def trigger_vector_sync(inp: dict[str, Any] | None = None) -> dict[str, An
             expense_id=expense_id,
             tenant_id=tenant_id,
         )
-        return {"status": "failed", "error": type(exc).__name__}
+        return {"status": "failed", "error": type(exc).__name__, "message": str(exc)}
 
 
 # ── Managed backend ────────────────────────────────────────────────────────
@@ -120,8 +135,6 @@ def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, 
     Idempotent: MERGE recomputes embedding if it already exists, so an
     HITL re-resolve picks up the new chunk_text.
     """
-    import time as _time
-
     if not (expense_id and tenant_id):
         return {"status": "skipped_missing_keys"}
 
@@ -155,9 +168,11 @@ def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, 
 
             row = None
             for attempt in range(18):
-                # Heartbeat keeps the Temporal UI showing progress while we
-                # poll a slow upstream (DLT gold MV ~10 min cadence). Without
-                # this the activity looks frozen for up to 18 minutes.
+                # `activity.heartbeat()` is safe inside a sync activity —
+                # the executor thread carries the activity context. This is
+                # the idiomatic Temporal pattern for blocking I/O loops.
+                # Heartbeat ALSO delivers cancellation: if the workflow is
+                # cancelled, the next heartbeat raises TemporalCancelledError.
                 activity.heartbeat({"attempt": attempt, "phase": "polling_gold_chunks"})
                 cur.execute(
                     f"""
@@ -170,7 +185,7 @@ def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, 
                 row = cur.fetchone()
                 if row:
                     break
-                _time.sleep(60)
+                time.sleep(60)
             if not row:
                 log.warning(
                     "vector_sync.row_not_in_gold_after_polling",

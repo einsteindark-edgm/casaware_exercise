@@ -15,6 +15,7 @@ containers per task queue.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 # Widen the ECS container-metadata fetcher timeouts BEFORE any boto3 client
 # is constructed (textract.py / llm.py do `import boto3` lazily inside
@@ -203,6 +204,15 @@ async def run_worker(task_queue: str) -> None:
         interceptors=interceptors,
     )
 
+    # ThreadPoolExecutor is REQUIRED for sync activities (e.g. trigger_vector_sync,
+    # which uses blocking databricks-sql-connector + urllib calls). Async-only
+    # workers fail to start any sync activity. Sized to match the concurrent-
+    # activity cap so a worker saturated on sync work doesn't deadlock.
+    activity_executor = ThreadPoolExecutor(
+        max_workers=settings.worker_max_concurrent_activities,
+        thread_name_prefix="temporal-activity",
+    )
+
     # When TASK_QUEUE=all we need one Worker per queue so child workflows find
     # the right hosts.
     if task_queue == "all":
@@ -218,6 +228,7 @@ async def run_worker(task_queue: str) -> None:
                 task_queue=q,
                 workflows=workflows,
                 activities=activities,
+                activity_executor=activity_executor,
                 max_concurrent_activities=settings.worker_max_concurrent_activities,
                 max_concurrent_workflow_tasks=settings.worker_max_concurrent_workflow_tasks,
             )
@@ -232,6 +243,7 @@ async def run_worker(task_queue: str) -> None:
         task_queue=task_queue,
         workflows=workflows,
         activities=activities,
+        activity_executor=activity_executor,
         max_concurrent_activities=settings.worker_max_concurrent_activities,
         max_concurrent_workflow_tasks=settings.worker_max_concurrent_workflow_tasks,
     )

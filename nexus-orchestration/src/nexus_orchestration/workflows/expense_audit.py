@@ -212,18 +212,48 @@ class ExpenseAuditWorkflow:
             start_to_close_timeout=timedelta(seconds=5),
         )
 
-        # 5) Best-effort: trigger Vector Search sync so the new gold row gets
-        # embedded for the chat agent. The activity polls gold.expense_chunks
-        # until the DLT pipeline materializes (~10 min cadence). Failures are
-        # swallowed by the activity.
+        # 5) Vector sync — REQUIRED. The activity polls gold.expense_chunks
+        # until the DLT gold pipeline materializes (~10 min cadence) and then
+        # MERGEs the embedding into gold.expense_embeddings. We previously
+        # treated this as best-effort and swallowed failures, but that meant
+        # workflows could close as `completed` while the embedding step had
+        # actually crashed (e.g. 2026-04-25 expense_01KQ37YXE34Q4JWEQ17CQRX5WQ
+        # hit `RuntimeError: no running event loop` and still closed clean —
+        # the chat agent had no embeddings for that receipt). If vector_sync
+        # surfaces a hard failure or a polling timeout, fail the workflow.
         self._current_step = "vectorizing"
         await _emit_step("vectorizing")
-        await workflow.execute_activity(
+        vec_result: dict[str, Any] = await workflow.execute_activity(
             "trigger_vector_sync",
             {"expense_id": expense_id, "tenant_id": tenant_id},
             start_to_close_timeout=timedelta(minutes=22),
+            # Activity heartbeats every 60s during the gold-MV polling loop.
+            # 3 minutes gives generous slack for TCP/SQL latency without
+            # letting a truly stuck activity hold up the workflow for 22m.
+            heartbeat_timeout=timedelta(minutes=3),
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
+        vec_status = (vec_result or {}).get("status")
+        if vec_status == "failed":
+            err_type = (vec_result or {}).get("error", "unknown")
+            err_msg = (vec_result or {}).get("message", "")
+            await self._fail(
+                expense_id,
+                tenant_id,
+                user_id,
+                "VECTOR_SYNC_FAILED",
+                f"{err_type}: {err_msg}".strip(": "),
+            )
+            return {"status": "failed", "reason": "VECTOR_SYNC_FAILED"}
+        if vec_status == "timed_out_not_in_gold":
+            await self._fail(
+                expense_id,
+                tenant_id,
+                user_id,
+                "VECTOR_SYNC_TIMEOUT",
+                "gold.expense_chunks did not materialize within polling window",
+            )
+            return {"status": "failed", "reason": "VECTOR_SYNC_TIMEOUT"}
 
         # 6) Redis completion event.
         self._state = "completed"
