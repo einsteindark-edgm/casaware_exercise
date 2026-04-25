@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,10 @@ from ulid import ULID
 
 from nexus_orchestration.activities._fakes import fake_bedrock_stream
 from nexus_orchestration.config import settings
+from nexus_orchestration.observability.logging import get_logger
+from nexus_orchestration.observability.otel import current_trace_id_hex
+
+_log = get_logger(__name__)
 
 
 # ── Hallucinated-link sanitizer (streaming) ─────────────────────────────────
@@ -185,10 +190,33 @@ async def bedrock_converse(inp: dict[str, Any]) -> dict[str, Any]:
     }
     request = {k: v for k, v in request.items() if v is not None}
 
+    # Phase E.6 — Bedrock decision log. Emits ONE structured log per
+    # invocation correlating: trace_id ↔ modelId ↔ tools_offered ↔
+    # tools_emitted_by_model ↔ stop_reason ↔ tokens. The Bedrock
+    # Invocation Logs (account-level, /aws/bedrock/...) hold the full
+    # prompt; this bridge log lets the dashboard JOIN them by timestamp
+    # + workflow_id to a specific trace_id.
+    _start = time.perf_counter()
+    _trace_id = current_trace_id_hex()
+    _tools_offered = [t["name"] for t in inp.get("tools", [])]
+
     if not inp.get("stream_to_redis"):
         response = client.converse(**request)
+        content = response["output"]["message"]["content"]
+        _emit_bedrock_decision_log(
+            trace_id=_trace_id,
+            workflow_id=inp.get("workflow_id"),
+            tenant_id=inp.get("tenant_id"),
+            model_id=settings.bedrock_model_id,
+            mode="sync",
+            tools_offered=_tools_offered,
+            content=content,
+            stop_reason=response["stopReason"],
+            usage=response.get("usage") or {},
+            latency_ms=(time.perf_counter() - _start) * 1000,
+        )
         return {
-            "content": response["output"]["message"]["content"],
+            "content": content,
             "stop_reason": response["stopReason"],
         }
 
@@ -278,7 +306,78 @@ async def bedrock_converse(inp: dict[str, Any]) -> dict[str, Any]:
     if current_text:
         accumulated_content.append({"text": current_text})
 
+    _emit_bedrock_decision_log(
+        trace_id=_trace_id,
+        workflow_id=workflow_id,
+        tenant_id=tenant_id,
+        model_id=settings.bedrock_model_id,
+        mode="stream",
+        tools_offered=_tools_offered,
+        content=accumulated_content,
+        stop_reason=stop_reason,
+        usage={},  # Bedrock streaming surface usage in metadata events; capture in a follow-up.
+        latency_ms=(time.perf_counter() - _start) * 1000,
+    )
+
     return {"content": accumulated_content, "stop_reason": stop_reason}
+
+
+def _emit_bedrock_decision_log(
+    *,
+    trace_id: str | None,
+    workflow_id: str | None,
+    tenant_id: str | None,
+    model_id: str,
+    mode: str,
+    tools_offered: list[str],
+    content: list[dict[str, Any]],
+    stop_reason: str,
+    usage: dict[str, Any],
+    latency_ms: float,
+) -> None:
+    """Write a single structured log line per Bedrock invocation.
+
+    The log captures *what the model decided*: which tools it chose to call
+    (with their argument names — not values, to keep the line small) and how
+    much text it produced. Full prompts/responses live in the Bedrock
+    Invocation Logs and are joined via timestamp + workflow_id.
+    """
+    tools_emitted: list[dict[str, Any]] = []
+    text_blocks = 0
+    text_chars = 0
+    for block in content or []:
+        if not isinstance(block, dict):
+            continue
+        if "toolUse" in block:
+            tu = block["toolUse"]
+            tools_emitted.append(
+                {
+                    "name": tu.get("name"),
+                    "input_keys": sorted(list((tu.get("input") or {}).keys())),
+                }
+            )
+        elif "text" in block:
+            text_blocks += 1
+            text_chars += len(block["text"] or "")
+
+    _log.info(
+        "bedrock.invoke",
+        trace_id=trace_id,
+        workflow_id=workflow_id,
+        tenant_id=tenant_id,
+        model_id=model_id,
+        mode=mode,
+        tools_offered=tools_offered,
+        tools_emitted=tools_emitted,
+        tools_emitted_count=len(tools_emitted),
+        stop_reason=stop_reason,
+        input_tokens=int(usage.get("inputTokens") or 0),
+        output_tokens=int(usage.get("outputTokens") or 0),
+        total_tokens=int(usage.get("totalTokens") or 0),
+        text_blocks=text_blocks,
+        text_chars=text_chars,
+        latency_ms=round(latency_ms, 2),
+    )
 
 
 async def _publish_token(
