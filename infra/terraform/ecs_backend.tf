@@ -22,10 +22,10 @@ resource "aws_ecs_task_definition" "backend" {
   requires_compatibilities = ["FARGATE"]
   # 256/512 was undersized — libmagic sniff + S3 upload starved the event loop
   # and the ECS metadata fetch missed its deadline → CredentialRetrievalError.
-  cpu                      = "512"
-  memory                   = "1024"
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
-  task_role_arn            = aws_iam_role.backend_task.arn
+  cpu                = "512"
+  memory             = "1024"
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
+  task_role_arn      = aws_iam_role.backend_task.arn
 
   container_definitions = jsonencode([{
     name      = local.backend_container_name
