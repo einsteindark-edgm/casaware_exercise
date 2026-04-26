@@ -91,6 +91,7 @@ const EVENT_LABELS: Record<string, string> = {
   approved: "Expense approved",
   completed: "Audit completed",
   failed: "Audit failed",
+  vector_sync_failed: "Vector index sync failed (non-blocking)",
 };
 
 interface FieldConflict {

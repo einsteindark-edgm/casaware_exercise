@@ -33,6 +33,32 @@ def _coerce_amount(value: Any) -> Any:
     return cleaned
 
 
+# Same defensive coercion para fechas. Un OCR de un recibo en LATAM/EU emite
+# `"25/04/2026"` (DD/MM/YYYY); el `_from_ocr` del worker antes de 2026-04-26
+# escribía ese string crudo en `final_date`, y Pydantic v2 sólo acepta ISO.
+# Resultado: `GET /api/v1/expenses` retornaba 500 porque UN registro malo
+# tumbaba la validación de toda la lista. Rescatamos los formatos comunes
+# acá; el fix root-cause es `_parse_ocr_date` en
+# nexus_orchestration.workflows.expense_audit (escribe ya en ISO).
+_DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d")
+
+
+def _coerce_date(value: Any) -> Any:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (date, datetime)):
+        return value
+    if not isinstance(value, str):
+        return value
+    s = value.strip()
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
 class ExpenseCreate(BaseModel):
     amount: float = Field(gt=0)
     currency: str = Field(min_length=3, max_length=3)
@@ -82,6 +108,11 @@ class ExpenseRead(BaseModel):
     @classmethod
     def _normalize_amount(cls, v: Any) -> Any:
         return _coerce_amount(v)
+
+    @field_validator("date", "final_date", mode="before")
+    @classmethod
+    def _normalize_date(cls, v: Any) -> Any:
+        return _coerce_date(v)
 
     @model_validator(mode="after")
     def _compute_had_hitl(self) -> "ExpenseRead":

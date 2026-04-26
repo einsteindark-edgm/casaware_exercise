@@ -12,7 +12,7 @@ Runs in `nexus-orchestrator-tq`. Spawns child workflows on `nexus-ocr-tq` and
 from __future__ import annotations
 
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from temporalio import workflow
@@ -44,6 +44,32 @@ def _parse_ocr_amount(value: Any) -> float | None:
         return float(cleaned)
     except ValueError:
         return None
+
+
+# Hermano del bug del amount: Textract devuelve fechas en el formato del
+# recibo (`25/04/2026` para LATAM/EU, `04/25/2026` para US, etc), pero
+# `expenses.final_date` es un campo `date` en Pydantic v2 que sólo acepta
+# ISO. Sin esta normalización, el HITL accept_ocr escribe la cadena cruda
+# y el `GET /api/v1/expenses` retorna 500 al validar la lista (incidente
+# 2026-04-26 sobre exp_01KQ3K99MGEMH309M7E60DW16B con `final_date="25/04/2026"`).
+# Probamos formatos en orden de probabilidad regional; LATAM/EU primero
+# porque es nuestro tenant principal. Si ninguno parsea, retornamos None
+# en lugar de la cadena cruda — Mongo NULL es preferible a un 500 en read.
+_OCR_DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d")
+
+
+def _parse_ocr_date(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        return None
+    s = value.strip()
+    for fmt in _OCR_DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
 
 with workflow.unsafe.imports_passed_through():
     from nexus_orchestration.workflows.audit_validation import AuditValidationWorkflow
@@ -240,15 +266,29 @@ class ExpenseAuditWorkflow:
             start_to_close_timeout=timedelta(seconds=5),
         )
 
-        # 5) Vector sync — REQUIRED. The activity polls gold.expense_chunks
-        # until the DLT gold pipeline materializes (~10 min cadence) and then
-        # MERGEs the embedding into gold.expense_embeddings. We previously
-        # treated this as best-effort and swallowed failures, but that meant
-        # workflows could close as `completed` while the embedding step had
-        # actually crashed (e.g. 2026-04-25 expense_01KQ37YXE34Q4JWEQ17CQRX5WQ
-        # hit `RuntimeError: no running event loop` and still closed clean —
-        # the chat agent had no embeddings for that receipt). If vector_sync
-        # surfaces a hard failure or a polling timeout, fail the workflow.
+        # 5) Vector sync — best-effort observability, NOT a gate on approval.
+        #
+        # The activity polls gold.expense_chunks (~10 min DLT cadence) and
+        # MERGEs the embedding into gold.expense_embeddings. Two prior
+        # designs were both wrong:
+        #   - Pre-2026-04-25: swallow failures silently → workflow closed
+        #     `completed` while embedding crashed (expense
+        #     01KQ37YXE34Q4JWEQ17CQRX5WQ, RuntimeError: no running event
+        #     loop). Chat agent had no embeddings for that receipt.
+        #   - Post-2026-04-25: call self._fail on any vector_sync failure
+        #     → that flips the expense status to `rejected`. But
+        #     gold.expense_audit filters `status = 'approved'`, so the
+        #     once-approved row was *removed* from gold whenever the gold
+        #     MV hadn't materialized within the 18-min polling window —
+        #     particularly common after HITL approves, where silver/gold
+        #     are still catching up to the fresh status=approved write.
+        #
+        # The HITL-resolved expense is approved by a human; that's the
+        # canonical business terminal state and must reach gold. A missing
+        # embedding is independently recoverable (the MERGE is idempotent,
+        # so an out-of-band retry can fill it in). We emit a timeline +
+        # SSE event so the failure is observable, but we do NOT touch the
+        # expense status.
         self._current_step = "vectorizing"
         await _emit_step("vectorizing")
         vec_result: dict[str, Any] = await workflow.execute_activity(
@@ -262,26 +302,46 @@ class ExpenseAuditWorkflow:
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
         vec_status = (vec_result or {}).get("status")
-        if vec_status == "failed":
-            err_type = (vec_result or {}).get("error", "unknown")
-            err_msg = (vec_result or {}).get("message", "")
-            await self._fail(
-                expense_id,
-                tenant_id,
-                user_id,
-                "VECTOR_SYNC_FAILED",
-                f"{err_type}: {err_msg}".strip(": "),
+        if vec_status in ("failed", "timed_out_not_in_gold"):
+            err_type = (vec_result or {}).get("error", vec_status)
+            err_msg = (
+                (vec_result or {}).get("message")
+                or (
+                    "gold.expense_chunks did not materialize within polling window"
+                    if vec_status == "timed_out_not_in_gold"
+                    else ""
+                )
             )
-            return {"status": "failed", "reason": "VECTOR_SYNC_FAILED"}
-        if vec_status == "timed_out_not_in_gold":
-            await self._fail(
-                expense_id,
-                tenant_id,
-                user_id,
-                "VECTOR_SYNC_TIMEOUT",
-                "gold.expense_chunks did not materialize within polling window",
+            await workflow.execute_activity(
+                "emit_expense_event",
+                {
+                    "expense_id": expense_id,
+                    "tenant_id": tenant_id,
+                    "event_type": "vector_sync_failed",
+                    "actor": {"type": "system", "id": "worker:orchestrator"},
+                    "details": {
+                        "status": vec_status,
+                        "error": err_type,
+                        "message": err_msg,
+                    },
+                },
+                start_to_close_timeout=timedelta(seconds=5),
             )
-            return {"status": "failed", "reason": "VECTOR_SYNC_TIMEOUT"}
+            await workflow.execute_activity(
+                "publish_event",
+                {
+                    "event_type": "workflow.vector_sync_failed",
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "expense_id": expense_id,
+                    "payload": {
+                        "status": vec_status,
+                        "error": err_type,
+                        "message": err_msg,
+                    },
+                },
+                start_to_close_timeout=timedelta(seconds=5),
+            )
 
         # 6) Redis completion event.
         self._state = "completed"
@@ -423,7 +483,7 @@ def _from_ocr(extracted: dict[str, Any]) -> dict[str, Any]:
     return {
         "amount": _parse_ocr_amount((extracted.get("ocr_total") or {}).get("value")),
         "vendor": (extracted.get("ocr_vendor") or {}).get("value"),
-        "date": (extracted.get("ocr_date") or {}).get("value"),
+        "date": _parse_ocr_date((extracted.get("ocr_date") or {}).get("value")),
     }
 
 

@@ -127,6 +127,15 @@ resource "aws_ecs_task_definition" "debezium" {
       { name = "DEBEZIUM_SOURCE_MONGODB_DATABASE_INCLUDE_LIST", value = "nexus_dev" },
       { name = "DEBEZIUM_SOURCE_MONGODB_COLLECTION_INCLUDE_LIST",
       value = "nexus_dev.expenses,nexus_dev.receipts,nexus_dev.hitl_tasks,nexus_dev.ocr_extractions,nexus_dev.expense_events" },
+      # Exclude explícito: el connector MongoDB de Debezium 3.0.0.Final
+      # tiende a snapshotear TODAS las collections de la database aunque
+      # `collection.include.list` esté seteado. Cuando intenta publicar
+      # `chat_turns`/`chat_sessions` al topic correspondiente y el topic
+      # no existe en MSK (auto.create no está garantizado), el producer
+      # hace timeout 60s y crashea el engine. Exclusión explícita evita
+      # que el snapshot/streaming las toque del todo.
+      { name = "DEBEZIUM_SOURCE_MONGODB_COLLECTION_EXCLUDE_LIST",
+      value = "nexus_dev.chat_turns,nexus_dev.chat_sessions" },
       # capture.mode: full document en update; pre-images se habilitan via
       # collMod changeStreamPreAndPostImages en Mongo (ver runbook).
       # NO existe 'change_streams_update_full_with_pre_image' como valor
@@ -134,28 +143,28 @@ resource "aws_ecs_task_definition" "debezium" {
       { name = "DEBEZIUM_SOURCE_CAPTURE_MODE", value = "change_streams_update_full" },
       { name = "DEBEZIUM_SOURCE_SNAPSHOT_MODE", value = "initial" },
 
-      # ── Offset + schema history storage ────────────────────────────
-      # FileOffsetBackingStore es efímero en Fargate (task dies → offsets lost
-      # → replay). Aceptable en dev con snapshot.mode=initial. Para prod
-      # migrar a KafkaOffsetBackingStore con topic _debezium_offsets.
-      { name = "DEBEZIUM_SOURCE_OFFSET_STORAGE", value = "org.apache.kafka.connect.storage.FileOffsetBackingStore" },
-      { name = "DEBEZIUM_SOURCE_OFFSET_STORAGE_FILE_FILENAME", value = "/tmp/offsets.dat" },
+      # ── Offset storage ─────────────────────────────────────────────
+      # MemoryOffsetBackingStore via JAVA_OPTS. Ephemeral (cada restart
+      # re-snapshot las 7 collections en ~5s), pero con la imagen 3.1.1
+      # el connector ya no crashea en streaming, así que la task se queda
+      # estable y el re-snapshot ocurre solo en deploys/OOM/scaling.
+      # Migrar a Kafka offset store es la próxima mejora — bloqueado por
+      # un quirk de Quarkus/SmallRye que no mapea
+      # `DEBEZIUM_SOURCE_OFFSET_STORAGE_*` env vars a las props internas
+      # del connector (síntoma documentado en rev:11–13).
+      { name = "JAVA_OPTS", value = "-Ddebezium.source.offset.storage=org.apache.kafka.connect.storage.MemoryOffsetBackingStore" },
       { name = "DEBEZIUM_SOURCE_OFFSET_FLUSH_INTERVAL_MS", value = "10000" },
 
       # ── SMT: unwrap + append __op / __source_ts_ms ─────────────────
-      # add.fields=op,source.ts_ms produce __op y __source_ts_ms con
-      # doble underscore (Debezium aplica el prefijo automáticamente).
-      # delete.tombstone.handling.mode=rewrite emite un único registro
-      # con __deleted=true en vez de op=d + tombstone separada — matchea
-      # el envelope que silver espera.
+      # Verificado 2026-04-26: el ClassCastException de streaming NO viene
+      # del SMT (lo deshabilitamos en rev:17 y el bug persistió igual).
+      # Está en el path KafkaChangeConsumer→KafkaProducer.doSend de
+      # Debezium Server 3.0.0.Final. Restaurando el SMT porque sin él
+      # bronze/silver/gold no entienden el envelope Debezium standard.
       { name = "DEBEZIUM_TRANSFORMS", value = "unwrap" },
       { name = "DEBEZIUM_TRANSFORMS_UNWRAP_TYPE", value = "io.debezium.connector.mongodb.transforms.ExtractNewDocumentState" },
       { name = "DEBEZIUM_TRANSFORMS_UNWRAP_ADD_FIELDS", value = "op,source.ts_ms" },
       { name = "DEBEZIUM_TRANSFORMS_UNWRAP_DELETE_TOMBSTONE_HANDLING_MODE", value = "rewrite" },
-      # Mongo arrays con valores de tipos mixtos (p.ej. expense_events.details,
-      # hitl_tasks.resolved_fields) hacen fallar al MongoDataConverter con
-      # "not the same type for all documents". 'document' los serializa como
-      # struct de índices 0..n permitiendo tipos heterogéneos.
       { name = "DEBEZIUM_TRANSFORMS_UNWRAP_ARRAY_ENCODING", value = "document" },
 
       # ── Sink: Kafka / MSK IAM ──────────────────────────────────────
@@ -165,11 +174,51 @@ resource "aws_ecs_task_definition" "debezium" {
       { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_SASL_MECHANISM", value = "AWS_MSK_IAM" },
       { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_SASL_JAAS_CONFIG", value = "software.amazon.msk.auth.iam.IAMLoginModule required;" },
       { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_SASL_CLIENT_CALLBACK_HANDLER_CLASS", value = "software.amazon.msk.auth.iam.IAMClientCallbackHandler" },
-      # JSON converter (default en Debezium Server). Sin schema inline.
-      { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_KEY_SERIALIZER", value = "org.apache.kafka.common.serialization.StringSerializer" },
-      { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_VALUE_SERIALIZER", value = "org.apache.kafka.common.serialization.StringSerializer" },
-      { name = "DEBEZIUM_FORMAT_VALUE", value = "json" },
-      { name = "DEBEZIUM_FORMAT_KEY", value = "json" },
+      # JSON format. value.serializer/key.serializer SON OBLIGATORIOS
+      # en Debezium Server 3.0.0.Final — el `KafkaChangeConsumer.start()`
+      # construye el KafkaProducer pasándole los `debezium.sink.kafka.producer.*`
+      # raw, sin auto-derivar nada del `format`. Si faltan, falla en boot
+      # con `ConfigException: Invalid value null for configuration key.serializer`
+      # (visto en task def revisión :10).
+      #
+      # El ClassCastException original (`String cannot be cast to [B` en
+      # KafkaChangeConsumer.java:107 → KafkaProducer.doSend:1106) NO viene
+      # de aquí — la combinación `format=json` (JsonFormat → String) +
+      # `StringSerializer` permitía que los snapshots iniciales (`__op='r'`)
+      # se publicaran sin problema. La crash sucede sólo al pasar de
+      # snapshot a streaming. Hipótesis vigente: bug en Debezium Server
+      # 3.0.0.Final con la combinación de SMTs (`array.encoding=document`
+      # + `delete.tombstone.handling.mode=rewrite` + `add.fields=op,source.ts_ms`)
+      # cuando procesan eventos `__op='u'/'d'` en lugar de `'r'`. Fix
+      # definitivo probable: subir el base image a `debezium/server:3.0.5.Final`
+      # o más nuevo en `debezium-image/Dockerfile`.
+      # Serializers byte[] end-to-end. La causa raíz del
+      # `ClassCastException: String cannot be cast to [B` que crasheaba
+      # cada evento de streaming es que algo en el path
+      # KafkaChangeConsumer→KafkaProducer.doSend hace `(byte[]) value`
+      # SÍNCRONAMENTE. Con `format=json` (`io.debezium.engine.format.Json`
+      # implements `SerializationFormat<String>` — verificado con javap)
+      # el valor llega como String, el cast explota. Snapshots no
+      # disparan ese path por razones internas y por eso publicaban OK.
+      #
+      # Fix: usar `jsonbytearray` (nombre derivado de
+      # `JsonByteArray.class.getSimpleName().toLowerCase()` per
+      # DebeziumServer.java static block) — implementa
+      # `SerializationFormat<byte[]>` así que el value llega como
+      # byte[] y el cast succeed. Pareado con `ByteArraySerializer`
+      # — el producer envía bytes nativos a Kafka.
+      #
+      # Bronze sigue compatible: hace `from_json(col("value").cast("string"))`
+      # y `byte[].cast("string")` en Spark deserializa UTF-8 trivialmente.
+      { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_KEY_SERIALIZER", value = "org.apache.kafka.common.serialization.ByteArraySerializer" },
+      { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_VALUE_SERIALIZER", value = "org.apache.kafka.common.serialization.ByteArraySerializer" },
+      # Mantenemos enable.idempotence=false como defensa adicional —
+      # Kafka 3.x lo activa por default y el flujo transaccional implícito
+      # con SASL_SSL/MSK IAM puede agregar latencia/quirks. No daña tener
+      # esto explícito.
+      { name = "DEBEZIUM_SINK_KAFKA_PRODUCER_ENABLE_IDEMPOTENCE", value = "false" },
+      { name = "DEBEZIUM_FORMAT_VALUE", value = "jsonbytearray" },
+      { name = "DEBEZIUM_FORMAT_KEY", value = "jsonbytearray" },
       { name = "DEBEZIUM_FORMAT_VALUE_SCHEMAS_ENABLE", value = "false" },
       { name = "DEBEZIUM_FORMAT_KEY_SCHEMAS_ENABLE", value = "false" },
 

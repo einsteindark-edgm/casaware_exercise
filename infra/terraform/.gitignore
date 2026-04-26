@@ -19,6 +19,7 @@ override.tf.json
 # Plans
 tfplan
 *.tfplan
+*.plan
 
 # CLI config
 .terraformrc

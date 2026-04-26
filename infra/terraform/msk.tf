@@ -204,7 +204,7 @@ resource "aws_msk_configuration" "nexus_prov" {
   name              = "${var.prefix}-kafka-config"
   kafka_versions    = [var.msk_kafka_version]
   server_properties = <<-EOT
-    auto.create.topics.enable=false
+    auto.create.topics.enable=true
     default.replication.factor=2
     min.insync.replicas=2
     num.partitions=3
