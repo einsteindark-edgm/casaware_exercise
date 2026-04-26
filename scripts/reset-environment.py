@@ -11,7 +11,8 @@
 #   --mongo       Vacia colecciones de MongoDB Atlas (preserva indices).
 #   --s3          Borra TODOS los objetos+versiones de los buckets S3.
 #   --medallion   DROP bronze/silver/gold tables (auto-detiene bronze DLT).
-#   --vector      Dispara sync del index VS (queda vacio si gold tambien fue).
+#   --vector      DELETE el VS index (su storage interno NO se vacia con sync —
+#                 hay que borrarlo y recrearlo despues del gold pipeline).
 #   --temporal    Termina workflows Running (ExpenseAuditWorkflow zombie post-reset).
 #   --all         (default si no se pasa nada) Corre los 5 anteriores.
 #
@@ -36,9 +37,11 @@
 # Despues del reset, para que el sistema siga funcionando recorda:
 #   1. Los 3 pipelines DLT (bronze/silver/gold) quedaron STOP — hay que
 #      arrancarlos (UI Databricks o esperar el cron de cdc_refresh).
-#   2. NO correr setup_vector_search.py — esta obsoleto, gold.expense_chunks
-#      es MV gestionada por el gold pipeline, no Delta table.
-#   3. El VS index se resincroniza automaticamente al regenerarse expense_chunks.
+#   2. NO correr setup_vector_search.py completo — esta obsoleto, su celda 1
+#      crea expense_chunks como Delta y rompe la MV del gold pipeline.
+#   3. El VS index fue BORRADO en el reset (no basta con sync — su storage
+#      interno persistia data vieja). Hay que recrearlo con el SDK
+#      databricks-vectorsearch DESPUES de que gold rematerialize la source.
 #   4. Primera escritura nueva en Mongo deberia llegar a gold en ~2 min.
 #
 # Requirements: pip install pymongo boto3 requests python-dotenv
@@ -222,8 +225,6 @@ def reset_s3(env: dict[str, str], dry_run: bool) -> None:
         env.get("S3_TEXTRACT_OUTPUT_BUCKET", "nexus-dev-edgm-textract-output"),
     ]
     region = env.get("AWS_REGION", "us-east-1")
-    access_key = env.get("AWS_ACCESS_KEY_ID")
-    secret_key = env.get("AWS_SECRET_ACCESS_KEY")
 
     try:
         import boto3
@@ -232,12 +233,13 @@ def reset_s3(env: dict[str, str], dry_run: bool) -> None:
         err("boto3 no instalado. Corre: pip install boto3")
         return
 
-    session_kwargs: dict[str, Any] = {"region_name": region}
-    if access_key and secret_key:
-        session_kwargs["aws_access_key_id"] = access_key
-        session_kwargs["aws_secret_access_key"] = secret_key
-
-    s3 = boto3.client("s3", **session_kwargs)
+    # IMPORTANTE: usamos default credential chain (shell env, ~/.aws/credentials,
+    # IAM role) en vez de las credenciales del .env. Esas son del usuario IAM
+    # del backend (permisos limitados a PutObject sobre prefixes especificos)
+    # y devuelven 403 en HeadBucket / DeleteObject. El admin que corre el reset
+    # debe tener perms via AWS_PROFILE / aws configure.
+    s3 = boto3.client("s3", region_name=region)
+    info(f"identidad: {boto3.client('sts').get_caller_identity().get('Arn', '?')}")
 
     for bucket in buckets:
         info(f"bucket: {bucket}")
@@ -459,11 +461,6 @@ def reset_vector(env: dict[str, str], dry_run: bool) -> None:
 
     info(f"endpoint: {endpoint}")
     info(f"index:    {index}")
-    info("(la tabla source gold.expense_chunks se borra en --medallion)")
-
-    if dry_run:
-        info("dispararia sync del index (dry-run)")
-        return
 
     try:
         import requests
@@ -471,21 +468,48 @@ def reset_vector(env: dict[str, str], dry_run: bool) -> None:
         err("requests no instalado. Corre: pip install requests")
         return
 
-    # POST /api/2.0/vector-search/indexes/{index}/sync
-    url = f"{host}/api/2.0/vector-search/indexes/{index}/sync"
+    # Por que DELETE y no SYNC:
+    # Un Vector Search Delta-Sync index tiene su PROPIO storage interno
+    # (snapshot vectorizado), desacoplado de la source table. Si dropeas la
+    # source, los syncs subsecuentes devuelven 404 pero el storage interno
+    # del index NO se vacia — los embeddings viejos siguen ahi y un
+    # similarity_search los devuelve como falsos positivos.
+    #
+    # La unica forma limpia de "vaciar" el index es DELETE el recurso entero
+    # y recrearlo despues de que el gold pipeline rematerialice la source.
+    # No es Delta table (aparece como FOREIGN en information_schema), asi que
+    # DROP TABLE no aplica.
+    headers = {"Authorization": f"Bearer {token}"}
+    get_url = f"{host}/api/2.0/vector-search/indexes/{index}"
+
     try:
-        r = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=30,
-        )
-        if r.status_code == 404:
-            warn("index no existe — corre setup_vector_search.py para crearlo")
-            return
-        r.raise_for_status()
-        ok("sync disparado (puede tardar minutos en propagar el truncate)")
+        gr = requests.get(get_url, headers=headers, timeout=30)
     except Exception as e:
-        err(f"sync fallo: {e}")
+        err(f"GET index fallo: {e}")
+        return
+
+    if gr.status_code == 404:
+        ok("index ya no existe, nada que borrar")
+        return
+    if gr.status_code != 200:
+        err(f"GET index status={gr.status_code}: {gr.text[:200]}")
+        return
+
+    indexed_rows = gr.json().get("status", {}).get("indexed_row_count", "?")
+    info(f"index existe con {indexed_rows} rows internos → DELETE")
+
+    if dry_run:
+        info("(dry-run: no borraria index)")
+        return
+
+    try:
+        dr = requests.delete(get_url, headers=headers, timeout=30)
+        if dr.status_code not in (200, 204):
+            err(f"DELETE devolvio status={dr.status_code}: {dr.text[:200]}")
+            return
+        ok("DELETE OK (puede tardar unos segundos en propagar)")
+    except Exception as e:
+        err(f"DELETE fallo: {e}")
 
 
 # ─── component: temporal ────────────────────────────────────────────────────
@@ -665,11 +689,22 @@ def main() -> int:
             "     - Silver y Gold: el job 'nexus-cdc-refresh' (cron 1 min)\n"
             "       los dispara automaticamente; tambien podes arrancarlos\n"
             "       a mano. Al arrancar recrean las MVs/STs vacias.\n"
-            "  2. NO correr setup_vector_search.py — ese notebook esta obsoleto.\n"
-            "     gold.expense_chunks es una MV gestionada por el gold pipeline,\n"
-            "     NO una Delta table. Re-correrlo destruiria la MV.\n"
-            "  3. El VS index (Delta Sync TRIGGERED) se re-sincroniza automaticamente\n"
-            "     cuando gold pipeline materialice expense_chunks de nuevo.\n"
+            "  2. NO correr el notebook completo setup_vector_search.py — esta\n"
+            "     obsoleto. Su celda 1 crea expense_chunks como Delta table y\n"
+            "     romperia la MV gestionada por el gold pipeline.\n"
+            "  3. El VS index fue BORRADO (su storage interno tenia rows viejos\n"
+            "     que un sync no podia limpiar). Hay que RECREARLO despues de\n"
+            "     que el gold pipeline rematerialice gold.expense_chunks.\n"
+            "     Receta SDK (4 lineas en un notebook):\n"
+            "       from databricks.vector_search.client import VectorSearchClient\n"
+            "       VectorSearchClient().create_delta_sync_index(\n"
+            "         endpoint_name='nexus-vs-dev',\n"
+            "         source_table_name='nexus_dev.gold.expense_chunks',\n"
+            "         index_name='nexus_dev.vector.expense_chunks_index',\n"
+            "         primary_key='chunk_id', pipeline_type='TRIGGERED',\n"
+            "         embedding_source_column='chunk_text',\n"
+            "         embedding_model_endpoint_name='databricks-bge-large-en')\n"
+            "     (o las celdas 2 y 3 SOLAS de setup_vector_search.py — NO la 1)\n"
             "  4. Redis (ElastiCache, no tocado): cache TTL=60s, SSE buffers TTL=1h.\n"
             "     Espera ~1 min antes de probar y refresca el browser para descartar\n"
             "     cualquier replay buffer del cliente.\n"

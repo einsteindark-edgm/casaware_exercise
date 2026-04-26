@@ -89,6 +89,46 @@ jobs:
             databricks pipelines update "$bronze_id" --json @/tmp/bronze_spec.json
             echo "forced continuous=true on bronze pipeline"
           fi
+          # Export for next step.
+          echo "BRONZE_PIPELINE_ID=$bronze_id" >> $GITHUB_ENV
+
+      # `bundle deploy` SIEMPRE cancela el update activo del pipeline al
+      # re-aplicar el spec (cambie o no). Despues queda IDLE y `continuous=true`
+      # NO se auto-arranca desde IDLE — significa "queda vivo cuando arranca",
+      # no "se restartea solo". Si no disparamos start-update aca, bronze queda
+      # apagado entre push y push, los CDC events de Mongo se acumulan en
+      # Kafka sin consumirse, y silver/gold no producen nada hasta el siguiente
+      # arranque manual. Idempotente: si ya esta RUNNING/STARTING, no-op.
+      - name: ensure bronze pipeline is running
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5 6; do
+            state=$(databricks pipelines get "$BRONZE_PIPELINE_ID" --output json | jq -r '.state')
+            echo "bronze state=$state (intento $i/6)"
+            case "$state" in
+              RUNNING|STARTING|RESETTING|DEPLOYING)
+                echo "already active, no start-update needed"
+                exit 0
+                ;;
+              IDLE|FAILED)
+                echo "bronze esta $state → start-update"
+                databricks pipelines start-update "$BRONZE_PIPELINE_ID" \
+                  --full-refresh-all=false
+                # Wait briefly for transition.
+                sleep 10
+                new_state=$(databricks pipelines get "$BRONZE_PIPELINE_ID" --output json | jq -r '.state')
+                echo "bronze post-start state=$new_state"
+                if [ "$new_state" = "RUNNING" ] || [ "$new_state" = "STARTING" ]; then
+                  exit 0
+                fi
+                ;;
+              *)
+                # STOPPING / RECOVERING / etc — esperar y reintentar.
+                sleep 10
+                ;;
+            esac
+          done
+          echo "::warning::bronze no llego a RUNNING tras 6 intentos, chequea UI"
 
       - name: full-refresh silver + gold (optional)
         if: github.event_name == 'workflow_dispatch' && inputs.full_refresh
