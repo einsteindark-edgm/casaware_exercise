@@ -11,11 +11,39 @@ Runs in `nexus-orchestrator-tq`. Spawns child workflows on `nexus-ocr-tq` and
 """
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from typing import Any
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+
+# Textract returns TOTAL as raw label text (e.g. "24,395.00 COP"). We must
+# normalise to a float before it lands in `final_data` — the Mongo write,
+# the silver/gold pipelines, and ExpenseRead all expect a number. Same
+# heuristic as activities/comparison.py, duplicated here because workflow
+# code must stay deterministic and self-contained.
+_OCR_AMOUNT_STRIP = re.compile(r"[^\d,.\-]")
+
+
+def _parse_ocr_amount(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    cleaned = _OCR_AMOUNT_STRIP.sub("", str(value)).strip()
+    if not cleaned:
+        return None
+    last_dot = cleaned.rfind(".")
+    last_comma = cleaned.rfind(",")
+    if last_comma > last_dot:
+        cleaned = cleaned.replace(".", "").replace(",", ".")
+    else:
+        cleaned = cleaned.replace(",", "")
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
 
 with workflow.unsafe.imports_passed_through():
     from nexus_orchestration.workflows.audit_validation import AuditValidationWorkflow
@@ -393,7 +421,7 @@ def _source_per_field(
 
 def _from_ocr(extracted: dict[str, Any]) -> dict[str, Any]:
     return {
-        "amount": (extracted.get("ocr_total") or {}).get("value"),
+        "amount": _parse_ocr_amount((extracted.get("ocr_total") or {}).get("value")),
         "vendor": (extracted.get("ocr_vendor") or {}).get("value"),
         "date": (extracted.get("ocr_date") or {}).get("value"),
     }

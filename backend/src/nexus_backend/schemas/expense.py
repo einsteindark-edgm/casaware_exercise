@@ -1,11 +1,36 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ExpenseStatus = Literal["pending", "processing", "hitl_required", "approved", "rejected"]
+
+# Some legacy rows wrote `amount` / `final_amount` as raw OCR text
+# (e.g. "24,395.00 COP") because the orchestrator's `_from_ocr` historically
+# passed the Textract string straight through. Parse defensively on read so
+# the list endpoint can recover those rows. Mirrors the heuristic in
+# nexus_orchestration.activities.comparison._parse_amount.
+_AMOUNT_STRIP = re.compile(r"[^\d,.\-]")
+
+
+def _coerce_amount(value: Any) -> Any:
+    if value is None or isinstance(value, (int, float)):
+        return value
+    if not isinstance(value, str):
+        return value
+    cleaned = _AMOUNT_STRIP.sub("", value).strip()
+    if not cleaned:
+        return None
+    last_dot = cleaned.rfind(".")
+    last_comma = cleaned.rfind(",")
+    if last_comma > last_dot:
+        cleaned = cleaned.replace(".", "").replace(",", ".")
+    else:
+        cleaned = cleaned.replace(",", "")
+    return cleaned
 
 
 class ExpenseCreate(BaseModel):
@@ -52,6 +77,11 @@ class ExpenseRead(BaseModel):
     # Computado: True si el expense pasó por HITL (se marcó al menos un
     # campo como "ocr" en source_per_field).
     had_hitl: bool = False
+
+    @field_validator("amount", "final_amount", mode="before")
+    @classmethod
+    def _normalize_amount(cls, v: Any) -> Any:
+        return _coerce_amount(v)
 
     @model_validator(mode="after")
     def _compute_had_hitl(self) -> "ExpenseRead":
