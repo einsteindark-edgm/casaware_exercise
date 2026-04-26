@@ -28,22 +28,27 @@ variables:
 
 targets:
   dev:
-    mode: development
+    # NO usamos `mode: development` porque el CLI aplica un mutator hard-coded
+    # que sobreescribe `continuous: false` a TODOS los pipelines, ignorando
+    # incluso los overrides al nivel de target. En su lugar replicamos los
+    # comportamientos de `mode: development` que sí queremos (prefix de
+    # nombres y development=true en pipelines) vía `presets` manuales — esos
+    # sí respetan los overrides del recurso. Ver mds/13-pipeline-modes-y-escalamiento.md.
     default: true
     workspace:
       host: https://dbc-01d95494-7b54.cloud.databricks.com
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    presets:
+      name_prefix: "[dev ${workspace.current_user.short_name}] "
+      pipelines_development: true
+      trigger_pause_status: PAUSED
+      tags:
+        dev: ${workspace.current_user.short_name}
     variables:
       catalog: "nexus_dev"
       mongodb_db: "nexus_dev"
       msk_bootstrap_servers: "b-1.nexusdevedgmkafkaprov.ygf4z6.c23.kafka.us-east-1.amazonaws.com:9098,b-2.nexusdevedgmkafkaprov.ygf4z6.c23.kafka.us-east-1.amazonaws.com:9098"
       msk_service_credential: "nexus-dev-edgm-msk-cred"
-    # Override del preset `mode: development`: el CLI fuerza `continuous: false`
-    # a todos los pipelines del bundle. Lo necesitamos en true para bronze
-    # (ver mds/13-pipeline-modes-y-escalamiento.md).
-    resources:
-      pipelines:
-        bronze_cdc_pipeline:
-          continuous: true
 
   prod:
     mode: production

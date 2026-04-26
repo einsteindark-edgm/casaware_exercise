@@ -63,6 +63,33 @@ jobs:
       - name: bundle deploy
         run: databricks bundle deploy --target dev
 
+      # Post-deploy fix: el Databricks CLI v0.298.x tiene un bug donde no
+      # propaga `continuous: true` del YAML al spec deployado (sí propaga
+      # false). Como el bronze pipeline DEBE estar en continuous para que
+      # la latencia Mongo→Bronze sea sub-segundos (ver
+      # mds/13-pipeline-modes-y-escalamiento.md), forzamos el flag vía API
+      # después del deploy. Idempotente: si el bundle ya lo aplicó bien
+      # (cuando arreglen el bug), este step es un no-op.
+      - name: ensure bronze pipeline is continuous
+        run: |
+          set -euo pipefail
+          bronze_id=$(databricks pipelines list-pipelines --output json \
+            | jq -r '.[] | select(.name | endswith("nexus-bronze-cdc-nexus_dev")) | .pipeline_id')
+          if [ -z "$bronze_id" ]; then
+            echo "::error::could not resolve bronze pipeline id"
+            exit 1
+          fi
+          current=$(databricks pipelines get "$bronze_id" --output json | jq -r '.spec.continuous // false')
+          echo "bronze pipeline_id=$bronze_id current continuous=$current"
+          if [ "$current" = "true" ]; then
+            echo "already continuous=true, no-op"
+          else
+            databricks pipelines get "$bronze_id" --output json \
+              | jq '.spec | .id = "'"$bronze_id"'" | .continuous = true' > /tmp/bronze_spec.json
+            databricks pipelines update "$bronze_id" --json @/tmp/bronze_spec.json
+            echo "forced continuous=true on bronze pipeline"
+          fi
+
       - name: full-refresh silver + gold (optional)
         if: github.event_name == 'workflow_dispatch' && inputs.full_refresh
         run: |
