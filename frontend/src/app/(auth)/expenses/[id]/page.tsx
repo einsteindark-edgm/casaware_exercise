@@ -42,6 +42,7 @@ const FIELD_LABELS: Record<string, string> = {
   vendor: "Vendor",
   date: "Date",
   currency: "Currency",
+  category: "Category",
 };
 
 function formatFinalValue(field: string, value: unknown, currency: string | null | undefined): string {
@@ -83,11 +84,98 @@ const EVENT_LABELS: Record<string, string> = {
   created: "Receipt uploaded",
   ocr_started: "OCR started (Textract)",
   ocr_completed: "OCR completed",
+  discrepancy_detected: "Discrepancies detected",
+  no_discrepancy: "No discrepancies",
   hitl_required: "Human review requested",
   hitl_resolved: "Human review resolved",
+  approved: "Expense approved",
   completed: "Audit completed",
   failed: "Audit failed",
 };
+
+interface FieldConflict {
+  field?: string;
+  user_value?: unknown;
+  ocr_value?: unknown;
+  confidence?: number;
+  similarity?: number;
+}
+
+function ConflictList({
+  conflicts,
+  hitlTaskId,
+}: {
+  conflicts: FieldConflict[];
+  hitlTaskId?: string;
+}) {
+  if (conflicts.length === 0) return null;
+  return (
+    <div className="mt-2 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-amber-800">
+          {conflicts.length} field{conflicts.length === 1 ? "" : "s"} need review
+        </span>
+        {hitlTaskId && (
+          <span className="font-mono text-[10px] text-gray-500 truncate">
+            {hitlTaskId}
+          </span>
+        )}
+      </div>
+      <div className="rounded border border-amber-200 bg-amber-50/50 divide-y divide-amber-100">
+        {conflicts.map((c, i) => {
+          const fieldKey = String(c.field ?? "");
+          const label = FIELD_LABELS[fieldKey] ?? fieldKey;
+          const conf =
+            typeof c.confidence === "number" ? c.confidence : undefined;
+          const sim =
+            typeof c.similarity === "number" ? c.similarity : undefined;
+          return (
+            <div key={i} className="px-2.5 py-2">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <span className="text-xs font-semibold text-gray-800">
+                  {label}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {sim != null && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-800">
+                      similarity {Math.round(sim * 100)}%
+                    </span>
+                  )}
+                  {conf != null && (
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[10px] ${confidenceColor(conf)}`}
+                      title="OCR confidence"
+                    >
+                      OCR {Math.round(conf)}%
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
+                <div className="flex items-start gap-2 rounded bg-white border border-gray-200 px-2 py-1">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-500 font-medium pt-0.5">
+                    User
+                  </span>
+                  <span className="text-gray-900 font-medium break-all">
+                    {formatValue(c.user_value)}
+                  </span>
+                </div>
+                <div className="flex items-start gap-2 rounded bg-white border border-gray-200 px-2 py-1">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-500 font-medium pt-0.5">
+                    OCR
+                  </span>
+                  <span className="text-gray-900 font-medium break-all">
+                    {formatValue(c.ocr_value)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function formatEventLabel(eventType: string): string {
   return EVENT_LABELS[eventType] ?? eventType;
@@ -192,26 +280,14 @@ function EventDetails({ event }: { event: ExpenseEvent }) {
     );
   }
 
-  if (event.event_type === "hitl_required") {
-    const conflicts = (d.fields_in_conflict as Array<Record<string, unknown>> | undefined) || [];
-    if (conflicts.length === 0) return null;
-    return (
-      <div className="mt-2 space-y-1">
-        <p className="text-xs text-gray-500">Fields needing review:</p>
-        {conflicts.map((c, i) => (
-          <div key={i} className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-medium text-gray-800 capitalize">{String(c.field)}:</span>
-            <span className="text-gray-600">user={formatValue(c.user_value)}</span>
-            <span className="text-gray-600">ocr={formatValue(c.ocr_value)}</span>
-            {c.confidence != null && (
-              <span className={`px-1.5 py-0.5 rounded text-[10px] ${confidenceColor(c.confidence as number)}`}>
-                {Math.round(c.confidence as number)}%
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-    );
+  if (
+    event.event_type === "hitl_required" ||
+    event.event_type === "discrepancy_detected"
+  ) {
+    const conflicts = (d.fields_in_conflict as FieldConflict[] | undefined) || [];
+    const hitlTaskId =
+      typeof d.hitl_task_id === "string" ? d.hitl_task_id : undefined;
+    return <ConflictList conflicts={conflicts} hitlTaskId={hitlTaskId} />;
   }
 
   if (event.event_type === "approved") {
