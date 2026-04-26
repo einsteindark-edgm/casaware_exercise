@@ -8,23 +8,23 @@ from __future__ import annotations
 SEARCH_EXPENSES_STRUCTURED_TOOL: dict = {
     "name": "search_expenses_structured",
     "description": (
-        "Búsqueda SQL exacta. Úsala SOLO cuando la pregunta del usuario "
-        "menciona explícitamente al menos uno de: un vendor con nombre "
-        "concreto ('Uber'), un valor o rango monetario ('más de $100'), "
-        "una fecha o rango ('marzo', 'entre el 1 y 15'), una moneda "
-        "('dólares', 'pesos'), una categoría exacta ('comida', 'viaje'), "
-        "o pide un total/suma/conteo ('cuánto gasté'). Para todo lo demás "
-        "—temas difusos, intenciones, exploración— usa "
-        "`search_expenses_semantic`. Si dudas, prefiere semantic. Devuelve "
-        "el agregado (aggregate=sum|count) o hasta 50 filas (aggregate=list) "
-        "con expense_id para citar."
+        "Exact SQL search. Use it ONLY when the user's question explicitly "
+        "mentions at least one of: a vendor with a concrete name ('Uber'), "
+        "a monetary value or range ('more than $100'), a date or range "
+        "('March', 'between the 1st and the 15th'), a currency ('dollars', "
+        "'pesos'), an exact category ('food', 'travel'), or asks for a "
+        "total/sum/count ('how much did I spend'). For everything else "
+        "—fuzzy topics, intents, exploration— use `search_expenses_semantic`. "
+        "If in doubt, prefer semantic. Returns the aggregate "
+        "(aggregate=sum|count) or up to 50 rows (aggregate=list) with "
+        "expense_id to cite."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "vendor": {
                 "type": "string",
-                "description": "Match case-insensitive sobre el vendor final del recibo.",
+                "description": "Case-insensitive match against the receipt's final vendor.",
             },
             "category": {
                 "type": "string",
@@ -49,13 +49,13 @@ SEARCH_EXPENSES_STRUCTURED_TOOL: dict = {
                 "enum": ["sum", "count", "list"],
                 "default": "list",
                 "description": (
-                    "Usa 'list' (default) para preguntas tipo '¿tengo gastos "
-                    "de X?' o 'muéstrame mis gastos'. Usa 'sum' SOLO cuando "
-                    "el usuario pide un total monetario explícito ('cuánto "
-                    "gasté'). Usa 'count' SOLO cuando pide un número de "
-                    "recibos explícito ('cuántos recibos'). Tanto sum como "
-                    "count devuelven también hasta 10 filas en `rows` con "
-                    "expense_id reales para citar."
+                    "Use 'list' (default) for questions like 'do I have any "
+                    "X expenses?' or 'show me my expenses'. Use 'sum' ONLY "
+                    "when the user asks for an explicit monetary total "
+                    "('how much did I spend'). Use 'count' ONLY when they "
+                    "ask for an explicit number of receipts ('how many "
+                    "receipts'). Both sum and count also return up to 10 "
+                    "rows in `rows` with real expense_id values to cite."
                 ),
             },
             "limit": {
