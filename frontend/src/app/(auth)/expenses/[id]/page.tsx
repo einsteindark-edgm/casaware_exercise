@@ -226,8 +226,56 @@ function formatValue(v: unknown): string {
   return String(v);
 }
 
+interface UserReportedSummary {
+  amount?: unknown;
+  currency?: unknown;
+  date?: unknown;
+  vendor?: unknown;
+  category?: unknown;
+}
+
+function formatReportedAmount(amount: unknown, currency: unknown): string {
+  if (amount == null || amount === "") return "—";
+  if (typeof amount === "number") {
+    const formatted = amount.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return typeof currency === "string" && currency
+      ? `${formatted} ${currency}`
+      : formatted;
+  }
+  return String(amount);
+}
+
 function EventDetails({ event }: { event: ExpenseEvent }) {
   const d = event.details || {};
+
+  if (event.event_type === "created") {
+    const reported = (d.user_reported as UserReportedSummary | undefined) || {};
+    const entries: Array<[string, string]> = [];
+    if (reported.amount != null && reported.amount !== "") {
+      entries.push([
+        FIELD_LABELS.amount,
+        formatReportedAmount(reported.amount, reported.currency),
+      ]);
+    }
+    if (reported.vendor) entries.push([FIELD_LABELS.vendor, String(reported.vendor)]);
+    if (reported.date) entries.push([FIELD_LABELS.date, String(reported.date)]);
+    if (reported.category)
+      entries.push([FIELD_LABELS.category, String(reported.category)]);
+    if (entries.length === 0) return null;
+    return (
+      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
+        {entries.map(([label, value]) => (
+          <div key={label} className="flex items-center gap-2 text-xs">
+            <span className="text-gray-500 min-w-[80px]">{label}:</span>
+            <span className="text-gray-800 font-medium break-all">{value}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   if (event.event_type === "ocr_completed") {
     const fields = (d.fields_summary as OcrField[] | undefined) || [];
@@ -314,7 +362,31 @@ function EventDetails({ event }: { event: ExpenseEvent }) {
 
   if (event.event_type === "ocr_started") {
     const key = d.s3_key as string | undefined;
-    return key ? <p className="mt-1 text-xs text-gray-500 truncate">s3://{key}</p> : null;
+    if (!key) return null;
+    const filename = key.split("/").pop() || key;
+    return (
+      <div className="mt-2 inline-flex items-center gap-1.5 text-xs rounded border border-gray-200 bg-gray-50 px-2 py-1 max-w-full">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          className="h-3.5 w-3.5 text-gray-500 flex-shrink-0"
+          aria-hidden="true"
+        >
+          <path
+            fillRule="evenodd"
+            d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm6 .5V7a1 1 0 0 0 1 1h2.5L10 4.5Z"
+            clipRule="evenodd"
+          />
+        </svg>
+        <span className="font-medium text-gray-800 truncate" title={key}>
+          {filename}
+        </span>
+        <span className="font-mono text-[10px] text-gray-500 truncate hidden sm:inline">
+          s3://{key}
+        </span>
+      </div>
+    );
   }
 
   if (event.event_type === "failed") {
