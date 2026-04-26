@@ -3,6 +3,7 @@
 Exposed to the LLM as `search_expenses_structured`. Databricks SQL over
 `gold.expense_audit`. Shape matches Anthropic / Bedrock Converse tool spec.
 """
+
 from __future__ import annotations
 
 SEARCH_EXPENSES_STRUCTURED_TOOL: dict = {

@@ -4,12 +4,20 @@ resources:
       name: "nexus-bronze-cdc-${var.catalog}"
       catalog: ${var.catalog}
       target: "bronze"
-      # Phase B+++: DLT Classic triggered. DLT Serverless no soporta NCC
+      # Phase B+++: DLT Classic continuous. DLT Serverless no soporta NCC
       # PrivateLink (gated por Databricks support). Classic compute corre
       # en la VPC del workspace (customer-managed) → peering con la VPC
       # de MSK + Route53 Resolver (ver infra/terraform/vpc_peering.tf).
-      # Latencia Mongo→bronze ≈ trigger interval (10 min) + cluster startup.
-      continuous: false
+      #
+      # 2026-04-26: pasamos a continuous para eliminar el cuello de botella
+      # Mongo→Bronze. Debezium ya entrega a Kafka en ms, pero antes el
+      # bronze solo se encendía cada 10 min (cron del job cdc_refresh) +
+      # 2-4 min de cold start = 10-14 min worst case. En continuous el
+      # cluster m5.large queda 24/7 leyendo los 5 streams Kafka, latencia
+      # Mongo→Bronze cae a <5s. El task `bronze_cdc` se removió del job
+      # cdc_refresh (ahora solo orquesta silver→gold cada 1 min).
+      # Ver mds/13-pipeline-modes-y-escalamiento.md.
+      continuous: true
       development: true
       serverless: false
 

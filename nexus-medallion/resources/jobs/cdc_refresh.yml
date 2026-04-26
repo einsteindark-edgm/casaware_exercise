@@ -3,25 +3,19 @@ resources:
     nexus_cdc_refresh:
       name: "nexus-cdc-refresh-${var.catalog}"
       description: >-
-        Phase B+++: bronze ahora es DLT Classic triggered (no continuous).
-        Schedule cada 10 min: bronze (Kafka → bronze) → silver → gold.
-        Latencia Mongo → bronze ≈ 10 min trigger + 2-4 min cluster startup
-        + ~30s ingestion = ~12-14 min worst case en dev.
+        2026-04-26: bronze pasó a continuous (siempre vivo leyendo Kafka).
+        Este job ya solo orquesta silver→gold cada 1 min, porque silver
+        y gold tienen materialized views que no soportan continuous con
+        serverless (gated). Latencia Mongo→Gold esperada: ~2 min worst case.
+        Ver mds/13-pipeline-modes-y-escalamiento.md.
 
       schedule:
-        quartz_cron_expression: "0 */10 * * * ?"
+        quartz_cron_expression: "0 * * * * ?"
         timezone_id: "UTC"
         pause_status: "UNPAUSED"
 
       tasks:
-        - task_key: bronze_cdc
-          pipeline_task:
-            pipeline_id: "${resources.pipelines.bronze_cdc_pipeline.id}"
-            full_refresh: false
-
         - task_key: silver
-          depends_on:
-            - task_key: bronze_cdc
           pipeline_task:
             pipeline_id: "${resources.pipelines.silver_pipeline.id}"
             full_refresh: false

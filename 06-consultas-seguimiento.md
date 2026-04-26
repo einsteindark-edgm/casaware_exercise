@@ -233,7 +233,7 @@ db.expense_events.find({}, { _id: 0, event_type: 1, created_at: 1 })
 ## 2. Databricks (`nexus_dev` catalog) — medallion
 
 Ejecuta en el SQL Editor o vía `databricks sql` CLI contra
-`https://dbc-cd7c46c8-d871.cloud.databricks.com`.
+`https://dbc-01d95494-7b54.cloud.databricks.com`.
 
 ### 2.1 Bronze — CDC crudo (Autoloader desde S3)
 

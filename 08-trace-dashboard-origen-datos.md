@@ -5,7 +5,7 @@ del dashboard `Nexus — Expense Trace (bronze→silver→gold)`. Sirve para
 aprender cómo fluyen los datos en el proyecto y para diagnosticar cuando un
 widget aparece vacío.
 
-URL: https://dbc-cd7c46c8-d871.cloud.databricks.com/dashboardsv3/01f13fdd03f4144e943cdf2c2543b212
+URL: https://dbc-01d95494-7b54.cloud.databricks.com/dashboardsv3/01f13fdd03f4144e943cdf2c2543b212
 
 ---
 

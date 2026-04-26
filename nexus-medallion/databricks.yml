@@ -37,6 +37,13 @@ targets:
       mongodb_db: "nexus_dev"
       msk_bootstrap_servers: "b-1.nexusdevedgmkafkaprov.ygf4z6.c23.kafka.us-east-1.amazonaws.com:9098,b-2.nexusdevedgmkafkaprov.ygf4z6.c23.kafka.us-east-1.amazonaws.com:9098"
       msk_service_credential: "nexus-dev-edgm-msk-cred"
+    # Override del preset `mode: development`: el CLI fuerza `continuous: false`
+    # a todos los pipelines del bundle. Lo necesitamos en true para bronze
+    # (ver mds/13-pipeline-modes-y-escalamiento.md).
+    resources:
+      pipelines:
+        bronze_cdc_pipeline:
+          continuous: true
 
   prod:
     mode: production
