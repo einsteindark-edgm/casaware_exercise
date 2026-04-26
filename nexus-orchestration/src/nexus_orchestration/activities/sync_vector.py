@@ -122,7 +122,7 @@ def _managed_sync(expense_id: str | None, tenant_id: str | None) -> dict[str, An
 
 
 def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, Any]:
-    """Embed the chunk_text and MERGE into gold.expense_embeddings.
+    """Embed the chunk_text and INSERT into gold.expense_embeddings.
 
     `gold.expense_chunks` is a DLT MATERIALIZED VIEW (UPDATE/MERGE not
     allowed on it). Embeddings live in a SEPARATE managed table
@@ -132,8 +132,17 @@ def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, 
     Polls gold.expense_chunks for up to ~18 minutes because the gold DLT
     pipeline runs every 10 min — the row may not have arrived by the time
     the workflow approves the expense (typically 6s after).
-    Idempotent: MERGE recomputes embedding if it already exists, so an
-    HITL re-resolve picks up the new chunk_text.
+
+    Append-only writes: hacemos INSERT puro en lugar de MERGE para evitar
+    conflictos de concurrencia entre HITLs paralelos. Delta serializa
+    UPDATE/MERGE/DELETE a nivel archivo (y row-level concurrency NO
+    cubre INSERTs sobre la misma partición). En cambio, INSERTs
+    concurrentes sólo agregan archivos nuevos sin tocar los existentes
+    → no chocan. Como contrapartida, varias re-vectorizaciones del
+    mismo chunk_id producen filas duplicadas; vector_search.py
+    desambigua con ROW_NUMBER() ORDER BY updated_at DESC al leer.
+    Compactación periódica (OPTIMIZE + dedupe) recoge la cola.
+    Ver 12-delta-merge-concurrencia-y-parquet.md.
     """
     if not (expense_id and tenant_id):
         return {"status": "skipped_missing_keys"}
@@ -154,6 +163,13 @@ def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, 
     ) as conn:
         with conn.cursor() as cur:
             # Make sure the embeddings table exists. CTAS-style, idempotent.
+            # TBLPROPERTIES son las que Databricks Serverless aplica por
+            # default en DBR 15+; las dejamos explícitas para que ambientes
+            # con runtimes viejos las hereden y para documentar la intención.
+            # NOTA: la concurrencia de HITLs paralelos NO la resuelven estas
+            # properties (row-level concurrency no cubre INSERT-on-same-
+            # partition); la resuelve el patrón append-only + dedupe en
+            # lectura. Ver 12-delta-merge-concurrencia-y-parquet.md.
             cur.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS {catalog}.gold.expense_embeddings (
@@ -163,6 +179,10 @@ def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, 
                     updated_at TIMESTAMP
                 ) USING DELTA
                 PARTITIONED BY (tenant_id)
+                TBLPROPERTIES (
+                    'delta.enableDeletionVectors' = 'true',
+                    'delta.enableRowTracking'     = 'true'
+                )
                 """
             )
 
@@ -198,28 +218,48 @@ def _local_sync_one(expense_id: str | None, tenant_id: str | None) -> dict[str, 
             chunk_id, chunk_text = row[0], row[1] or ""
             activity.heartbeat({"phase": "embedding"})
             embedding = _embed([chunk_text])[0]
-            activity.heartbeat({"phase": "merging"})
+            activity.heartbeat({"phase": "inserting"})
 
             # Spark's array<float> bind is hairy from databricks-sql-connector;
             # format the literal inline. Values come from the embedding
             # endpoint (no user input, no SQL injection risk).
             literal = "ARRAY(" + ",".join(f"CAST({v} AS FLOAT)" for v in embedding) + ")"
-            cur.execute(
-                f"""
-                MERGE INTO {catalog}.gold.expense_embeddings t
-                USING (SELECT
-                    %(chunk_id)s AS chunk_id,
-                    %(tenant_id)s AS tenant_id,
-                    {literal} AS embedding,
-                    current_timestamp() AS updated_at
-                ) s
-                ON t.chunk_id = s.chunk_id AND t.tenant_id = s.tenant_id
-                WHEN MATCHED THEN UPDATE SET embedding = s.embedding, updated_at = s.updated_at
-                WHEN NOT MATCHED THEN INSERT (chunk_id, tenant_id, embedding, updated_at)
-                    VALUES (s.chunk_id, s.tenant_id, s.embedding, s.updated_at)
-                """,
-                {"chunk_id": chunk_id, "tenant_id": tenant_id},
-            )
+            insert_sql = f"""
+                INSERT INTO {catalog}.gold.expense_embeddings
+                    (chunk_id, tenant_id, embedding, updated_at)
+                VALUES (
+                    %(chunk_id)s,
+                    %(tenant_id)s,
+                    {literal},
+                    current_timestamp()
+                )
+                """
+            # INSERTs concurrentes en Delta no conflictan: cada writer agrega
+            # archivos parquet nuevos sin tocar los existentes. Aún así
+            # mantenemos un retry chico contra DELTA_CONCURRENT_APPEND para
+            # cubrir el edge-case en que un OPTIMIZE/VACUUM esté corriendo
+            # en paralelo (esa SÍ reescribe archivos). Backoff 1s/2s/4s.
+            for ins_attempt in range(4):
+                try:
+                    cur.execute(insert_sql, {"chunk_id": chunk_id, "tenant_id": tenant_id})
+                    break
+                except Exception as ins_exc:
+                    if (
+                        "DELTA_CONCURRENT_APPEND" in str(ins_exc)
+                        and ins_attempt < 3
+                    ):
+                        wait_s = 2**ins_attempt
+                        log.warning(
+                            "vector_sync.delta_concurrent_retry",
+                            expense_id=expense_id,
+                            tenant_id=tenant_id,
+                            attempt=ins_attempt + 1,
+                            wait_s=wait_s,
+                        )
+                        activity.heartbeat({"phase": "insert_retry", "attempt": ins_attempt + 1})
+                        time.sleep(wait_s)
+                        continue
+                    raise
 
     log.info(
         "vector_sync.triggered_local",

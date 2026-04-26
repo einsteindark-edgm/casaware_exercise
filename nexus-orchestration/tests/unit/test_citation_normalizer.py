@@ -6,6 +6,8 @@ Tool-result blocks are in Bedrock Converse format:
 from __future__ import annotations
 
 from nexus_orchestration.workflows.rag_query import (
+    _citations_for_cited_ids,
+    _cited_expense_ids_in_order,
     _extract_citations_from_history,
     normalize_citation,
 )
@@ -123,6 +125,66 @@ def test_cap_at_10():
     ]
     cits = _extract_citations_from_history(messages)
     assert len(cits) == 10
+
+
+def test_cited_ids_in_order_dedupes_and_preserves_order():
+    text = (
+        "Mira [a](/expenses/exp_B) y luego [b](/expenses/exp_A) "
+        "y de nuevo [c](/expenses/exp_B)."
+    )
+    assert _cited_expense_ids_in_order(text) == ["exp_B", "exp_A"]
+
+
+def test_citations_for_cited_ids_filters_to_what_llm_cited():
+    """Tool returned 3 rows, LLM cited only one — chips must follow the LLM."""
+    rows = [
+        {
+            "expense_id": "exp_GOOD",
+            "vendor": "TT",
+            "amount": 5700.0,
+            "currency": "COP",
+            "_source": "semantic",
+            "link": "/expenses/exp_GOOD",
+        },
+        {
+            "expense_id": "exp_NOISE_1",
+            "vendor": "Starbucks",
+            "amount": 24395.0,
+            "currency": "COP",
+            "_source": "semantic",
+            "link": "/expenses/exp_NOISE_1",
+        },
+        {
+            "expense_id": "exp_NOISE_2",
+            "vendor": "Starbucks",
+            "amount": 298765.0,
+            "currency": "COP",
+            "_source": "semantic",
+            "link": "/expenses/exp_NOISE_2",
+        },
+    ]
+    messages = [
+        {"role": "user", "content": [_tool_result_block("t1", rows)]},
+    ]
+    final_text = "Encontré la factura. [ver recibo](/expenses/exp_GOOD)"
+
+    cits = _citations_for_cited_ids(messages, final_text)
+    assert [c["expense_id"] for c in cits] == ["exp_GOOD"]
+    assert cits[0]["vendor"] == "TT"
+
+
+def test_citations_for_cited_ids_empty_when_text_has_no_links():
+    rows = [
+        {
+            "expense_id": "exp_X",
+            "vendor": "Uber",
+            "amount": 10.0,
+            "_source": "sql",
+            "link": "/expenses/exp_X",
+        }
+    ]
+    messages = [{"role": "user", "content": [_tool_result_block("t1", rows)]}]
+    assert _citations_for_cited_ids(messages, "No encontré gastos que coincidan") == []
 
 
 def test_aggregate_only_payload_yields_no_citations():

@@ -97,7 +97,6 @@ class RAGQueryWorkflow:
             messages.append({"role": "assistant", "content": response["content"]})
 
             if response.get("stop_reason") != "tool_use":
-                citations = _extract_citations_from_history(messages)
                 final_text = _extract_final_text(response["content"])
                 allowed_ids = _allowed_expense_ids(messages)
                 final_text, hallucinated = _strip_hallucinated_expense_links(
@@ -108,6 +107,11 @@ class RAGQueryWorkflow:
                         "stripped hallucinated expense links",
                         extra={"workflow_id": workflow_id, "ids": list(hallucinated)},
                     )
+                # Citations follow the LLM's actual answer: only the IDs it
+                # cited in final_text become chips, hydrated with metadata
+                # from tool results. Otherwise the UI shows every row the
+                # tools returned even when the model picked just one.
+                citations = _citations_for_cited_ids(messages, final_text)
 
                 await workflow.execute_activity(
                     "save_chat_turn",
@@ -358,6 +362,71 @@ def _extract_citations_from_history(
                     if len(citations) >= 10:
                         return citations
     return citations
+
+
+def _rows_by_expense_id(messages: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Index normalized citations by expense_id, keeping the first row seen
+    per id (so the source aligns with whichever tool returned it first).
+    """
+    by_id: dict[str, dict[str, Any]] = {}
+    for msg in messages:
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            tool_result = block.get("toolResult")
+            if not isinstance(tool_result, dict):
+                continue
+            for item in tool_result.get("content", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                payload = item.get("json")
+                if payload is None:
+                    continue
+                for raw in _iter_tool_result_rows(payload):
+                    cit = normalize_citation(raw)
+                    if cit is None:
+                        continue
+                    by_id.setdefault(cit["expense_id"], cit)
+    return by_id
+
+
+def _cited_expense_ids_in_order(final_text: str) -> list[str]:
+    """Expense IDs the assistant cited in its final text, in document order
+    and deduplicated.
+    """
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for match in _EXPENSE_LINK_RE.finditer(final_text):
+        eid = match.group(2)
+        if eid in seen:
+            continue
+        seen.add(eid)
+        ordered.append(eid)
+    return ordered
+
+
+def _citations_for_cited_ids(
+    messages: list[dict[str, Any]], final_text: str
+) -> list[dict[str, Any]]:
+    """Return citation chips that match the IDs the LLM cited in final_text,
+    hydrated with metadata from tool results. Capped at 10 to mirror the
+    legacy ceiling.
+    """
+    by_id = _rows_by_expense_id(messages)
+    out: list[dict[str, Any]] = []
+    for eid in _cited_expense_ids_in_order(final_text):
+        cit = by_id.get(eid)
+        if cit is None:
+            continue
+        out.append(cit)
+        if len(out) >= 10:
+            break
+    return out
 
 
 def _extract_final_text(content: list[dict[str, Any]]) -> str:

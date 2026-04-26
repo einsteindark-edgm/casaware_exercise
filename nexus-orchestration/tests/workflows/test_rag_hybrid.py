@@ -24,10 +24,12 @@ from nexus_orchestration.activities._fakes import fake_sql_search, fake_vector_s
 from nexus_orchestration.workflows.rag_query import RAGQueryWorkflow
 
 _captured_tool_inputs: list[dict[str, Any]] = []
+_captured_tool_results: list[dict[str, Any]] = []
 
 
 def _reset_captured() -> None:
     _captured_tool_inputs.clear()
+    _captured_tool_results.clear()
 
 
 @activity.defn(name="load_rag_system_prompt")
@@ -55,9 +57,13 @@ async def mock_vector_search(inp: dict[str, Any]) -> list[dict[str, Any]]:
     _captured_tool_inputs.append(
         {"tool": "search_expenses_semantic", "input": dict(inp)}
     )
-    return fake_vector_search(
+    rows = fake_vector_search(
         inp.get("query", ""), inp["tenant_filter"], int(inp.get("k", 5))
     )
+    _captured_tool_results.append(
+        {"tool": "search_expenses_semantic", "rows": list(rows)}
+    )
+    return rows
 
 
 @activity.defn(name="search_expenses_structured")
@@ -94,10 +100,17 @@ async def mock_sql_search(inp: dict[str, Any]) -> dict[str, Any]:
         if eid:
             row["link"] = f"/expenses/{eid}"
             row["_source"] = "sql"
+    _captured_tool_results.append(
+        {"tool": "search_expenses_structured", "rows": list(result.get("rows", []))}
+    )
     return result
 
 
-def _bedrock_mock(script: list[dict[str, Any]]):
+def _bedrock_mock(script: list[Any]):
+    """Each script entry is either a Bedrock-shaped dict, or a callable
+    `() -> dict` evaluated at activity-call time (so the final-text turn can
+    cite expense_ids that came from an earlier tool call).
+    """
     counter = {"i": 0}
 
     @activity.defn(name="bedrock_converse")
@@ -105,7 +118,8 @@ def _bedrock_mock(script: list[dict[str, Any]]):
         i = counter["i"]
         counter["i"] = i + 1
         if i < len(script):
-            return script[i]
+            entry = script[i]
+            return entry() if callable(entry) else entry
         return {"content": [{"text": "done"}], "stop_reason": "end_turn"}
 
     return mock_bedrock
@@ -167,6 +181,27 @@ def _bedrock_text(text: str):
 
 # ── Scenarios ──────────────────────────────────────────────────────────────
 
+def _cite_first_row_after(tool_name: str):
+    """Returns a callable that, at the time it's invoked, builds a final-text
+    response citing the first expense_id from the most recent capture for
+    `tool_name`. Used so test scripts can reference IDs the fakes produced.
+    """
+
+    def build() -> dict[str, Any]:
+        for capture in reversed(_captured_tool_results):
+            if capture["tool"] != tool_name:
+                continue
+            for row in capture["rows"]:
+                eid = row.get("expense_id")
+                if eid:
+                    return _bedrock_text(
+                        f"Aquí está. [ver recibo](/expenses/{eid})"
+                    )
+        return _bedrock_text("No encontré gastos que coincidan")
+
+    return build
+
+
 @pytest.mark.asyncio
 async def test_structured_tool_path():
     script = [
@@ -174,13 +209,13 @@ async def test_structured_tool_path():
             "search_expenses_structured",
             {"vendor": "Uber", "aggregate": "list"},
         ),
-        _bedrock_text("Encontré 3 recibos de Uber."),
+        _cite_first_row_after("search_expenses_structured"),
     ]
     result = await _run_workflow(script, "¿cuánto gasté en Uber?")
     assert result["status"] == "completed"
-    assert len(result["citations"]) > 0
-    assert all(c["link"].startswith("/expenses/") for c in result["citations"])
-    assert all(c["source"] == "sql" for c in result["citations"])
+    assert len(result["citations"]) == 1
+    assert result["citations"][0]["link"].startswith("/expenses/")
+    assert result["citations"][0]["source"] == "sql"
 
 
 @pytest.mark.asyncio
@@ -190,12 +225,30 @@ async def test_semantic_tool_path():
             "search_expenses_semantic",
             {"query": "comida saludable", "k": 3},
         ),
-        _bedrock_text("Estos son los más relevantes."),
+        _cite_first_row_after("search_expenses_semantic"),
     ]
     result = await _run_workflow(script, "recibos relacionados con comida saludable")
     assert result["status"] == "completed"
-    assert len(result["citations"]) > 0
-    assert all(c["source"] == "semantic" for c in result["citations"])
+    assert len(result["citations"]) == 1
+    assert result["citations"][0]["source"] == "semantic"
+
+
+@pytest.mark.asyncio
+async def test_extra_tool_rows_are_not_attached_when_llm_cites_one():
+    """Regression: LLM only cites one of N rows the tool returned. The chip
+    list must mirror the answer, not dump every row.
+    """
+    script = [
+        _bedrock_tool_use(
+            "search_expenses_semantic",
+            {"query": "Proveedor Logístico Global", "k": 5},
+        ),
+        _cite_first_row_after("search_expenses_semantic"),
+    ]
+    result = await _run_workflow(script, "dame la factura de Proveedor Logístico Global")
+    assert result["status"] == "completed"
+    # fake_vector_search returns 3 rows but the LLM cited only the first.
+    assert len(result["citations"]) == 1
 
 
 @pytest.mark.asyncio

@@ -69,6 +69,7 @@ def test_event_types_superset_of_worker():
         "workflow.hitl_required",
         "workflow.completed",
         "workflow.failed",
+        "workflow.vector_sync_failed",
         "chat.token",
         "chat.complete",
     }

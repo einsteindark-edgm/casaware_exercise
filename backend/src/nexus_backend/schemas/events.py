@@ -15,6 +15,10 @@ EventType = Literal[
     "workflow.hitl_resolved",
     "workflow.completed",
     "workflow.failed",
+    # Non-fatal: el embedding MERGE del worker falló (timeout o Delta
+    # concurrent append). El expense ya está approved; este evento sólo
+    # informa a la UI para mostrar el badge "vector index sync failed".
+    "workflow.vector_sync_failed",
     "chat.token",
     "chat.complete",
     "ping",

@@ -21,6 +21,10 @@ EventType = Literal[
     "workflow.hitl_resolved",
     "workflow.completed",
     "workflow.failed",
+    # Non-fatal: el embedding MERGE falló (timeout, Delta concurrent append,
+    # etc). El expense ya está approved en mongo y silver; gold lo recogerá
+    # cuando el embedding sea recuperado out-of-band.
+    "workflow.vector_sync_failed",
     "chat.token",
     "chat.complete",
     "ping",

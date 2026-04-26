@@ -133,13 +133,28 @@ def _local_sync(query: str, tenant_filter: str, k: int) -> list[dict[str, Any]]:
             # gold.expense_chunks is a DLT MV (no UPDATE/MERGE allowed).
             # LEFT JOIN tolerates both: pre-computed embeddings (fast path)
             # and rows where the activity hasn't run yet (NULL → on-the-fly).
+            #
+            # sync_vector.py escribe append-only (INSERT) para evitar
+            # conflictos de concurrencia entre HITLs paralelos. Eso puede
+            # producir múltiples filas por (chunk_id, tenant_id) cuando un
+            # expense se re-vectoriza. Deduplicamos en lectura tomando la
+            # más reciente por updated_at. Ver 12-delta-merge-concurrencia-y-parquet.md.
             cur.execute(
                 f"""
+                WITH latest_emb AS (
+                    SELECT chunk_id, tenant_id, embedding, updated_at,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY chunk_id, tenant_id
+                               ORDER BY updated_at DESC
+                           ) AS rn
+                    FROM {catalog}.gold.expense_embeddings
+                    WHERE tenant_id = %(tenant_id)s
+                )
                 SELECT c.chunk_id, c.expense_id, c.chunk_text, c.amount, c.currency,
                        c.vendor, c.date, c.category, e.embedding
                 FROM {catalog}.gold.expense_chunks c
-                LEFT JOIN {catalog}.gold.expense_embeddings e
-                  ON c.chunk_id = e.chunk_id AND c.tenant_id = e.tenant_id
+                LEFT JOIN latest_emb e
+                  ON c.chunk_id = e.chunk_id AND c.tenant_id = e.tenant_id AND e.rn = 1
                 WHERE c.tenant_id = %(tenant_id)s
                 """,
                 {"tenant_id": tenant_filter},
